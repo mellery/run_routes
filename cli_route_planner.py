@@ -406,40 +406,124 @@ class RefactoredCLIRoutePlanner:
             lons = [p['longitude'] for p in detailed_path]
             elevations = [p['elevation'] for p in detailed_path]
             
+            # Calculate bounds with some padding
+            lat_margin = (max(lats) - min(lats)) * 0.1
+            lon_margin = (max(lons) - min(lons)) * 0.1
+            bounds = [
+                min(lons) - lon_margin,  # west
+                max(lons) + lon_margin,  # east  
+                min(lats) - lat_margin,  # south
+                max(lats) + lat_margin   # north
+            ]
+            
             # Create figure with map
             fig, ax = plt.subplots(1, 1, figsize=(12, 10))
             
-            # Plot route path with elevation-based coloring
-            scatter = ax.scatter(lons, lats, c=elevations, cmap='terrain', 
-                               s=8, alpha=0.8, edgecolors='none')
+            # Try to add OpenStreetMap background
+            try:
+                import contextily as ctx
+                print("   📍 Adding OpenStreetMap background...")
+                
+                # Set the bounds first
+                ax.set_xlim(bounds[0], bounds[1])
+                ax.set_ylim(bounds[2], bounds[3])
+                
+                # Convert to Web Mercator for contextily
+                import pyproj
+                transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+                
+                # Transform route coordinates
+                lons_merc, lats_merc = transformer.transform(lons, lats)
+                
+                # Transform bounds
+                west_merc, south_merc = transformer.transform(bounds[0], bounds[2])
+                east_merc, north_merc = transformer.transform(bounds[1], bounds[3])
+                
+                # Set mercator bounds
+                ax.set_xlim(west_merc, east_merc)
+                ax.set_ylim(south_merc, north_merc)
+                
+                # Add OpenStreetMap basemap
+                ctx.add_basemap(ax, crs="EPSG:3857", source=ctx.providers.OpenStreetMap.Mapnik, alpha=0.8)
+                
+                # Plot route path with elevation-based coloring (in mercator coordinates)
+                scatter = ax.scatter(lons_merc, lats_merc, c=elevations, cmap='plasma', 
+                                   s=12, alpha=0.9, edgecolors='white', linewidths=0.5, zorder=5)
+                
+                # Add route line (in mercator coordinates)
+                ax.plot(lons_merc, lats_merc, 'r-', linewidth=3, alpha=0.8, 
+                       label=f'Route ({route_result["stats"]["total_distance_km"]:.2f}km)', zorder=4)
+                
+                # Mark start/finish point
+                if detailed_path:
+                    start_point = detailed_path[0]
+                    start_lon_merc, start_lat_merc = transformer.transform(start_point['longitude'], start_point['latitude'])
+                    ax.plot(start_lon_merc, start_lat_merc, 'go', markersize=15, 
+                           markeredgecolor='darkgreen', markeredgewidth=3, 
+                           label='Start/Finish', zorder=6)
+                
+                # Mark key intersections (original TSP waypoints)
+                original_route = route_result['route']
+                key_intersections = [p for p in detailed_path if p['node_id'] in original_route]
+                if len(key_intersections) > 1:  # Exclude start point
+                    key_lons = [p['longitude'] for p in key_intersections[1:]]
+                    key_lats = [p['latitude'] for p in key_intersections[1:]]
+                    key_lons_merc, key_lats_merc = transformer.transform(key_lons, key_lats)
+                    ax.plot(key_lons_merc, key_lats_merc, 'bo', markersize=10, 
+                           markeredgecolor='darkblue', markeredgewidth=2,
+                           label=f'Key Waypoints ({len(key_intersections)-1})', zorder=6)
+                
+                # Remove lat/lon labels since we're in mercator
+                ax.set_xlabel('Easting (m)')
+                ax.set_ylabel('Northing (m)')
+                
+                use_osm = True
+                
+            except ImportError:
+                print("   ⚠️ Contextily not available, using coordinate plot...")
+                use_osm = False
+            except Exception as e:
+                print(f"   ⚠️ OSM basemap failed ({str(e)[:50]}), using coordinate plot...")
+                use_osm = False
             
-            # Add route line
-            ax.plot(lons, lats, 'r-', linewidth=2, alpha=0.7, label=f'Route ({route_result["stats"]["total_distance_km"]:.2f}km)')
+            # Fallback to coordinate plot without OSM
+            if not use_osm:
+                # Plot route path with elevation-based coloring
+                scatter = ax.scatter(lons, lats, c=elevations, cmap='terrain', 
+                                   s=8, alpha=0.8, edgecolors='none')
+                
+                # Add route line
+                ax.plot(lons, lats, 'r-', linewidth=2, alpha=0.7, 
+                       label=f'Route ({route_result["stats"]["total_distance_km"]:.2f}km)')
+                
+                # Mark start/finish point
+                if detailed_path:
+                    start_point = detailed_path[0]
+                    ax.plot(start_point['longitude'], start_point['latitude'], 
+                           'go', markersize=12, markeredgecolor='darkgreen', 
+                           markeredgewidth=2, label='Start/Finish')
+                
+                # Mark key intersections (original TSP waypoints)
+                original_route = route_result['route']
+                key_intersections = [p for p in detailed_path if p['node_id'] in original_route]
+                if len(key_intersections) > 1:  # Exclude start point
+                    key_lons = [p['longitude'] for p in key_intersections[1:]]
+                    key_lats = [p['latitude'] for p in key_intersections[1:]]
+                    ax.plot(key_lons, key_lats, 'bo', markersize=8, 
+                           markeredgecolor='darkblue', markeredgewidth=1,
+                           label=f'Key Waypoints ({len(key_intersections)-1})')
+                
+                # Set bounds and styling for coordinate plot
+                ax.set_xlim(bounds[0], bounds[1])
+                ax.set_ylim(bounds[2], bounds[3])
+                ax.set_xlabel('Longitude')
+                ax.set_ylabel('Latitude')
+                ax.grid(True, alpha=0.3)
             
-            # Mark start/finish point
-            if detailed_path:
-                start_point = detailed_path[0]
-                ax.plot(start_point['longitude'], start_point['latitude'], 
-                       'go', markersize=12, markeredgecolor='darkgreen', 
-                       markeredgewidth=2, label='Start/Finish')
-            
-            # Mark key intersections (original TSP waypoints)
-            original_route = route_result['route']
-            key_intersections = [p for p in detailed_path if p['node_id'] in original_route]
-            if len(key_intersections) > 1:  # Exclude start point
-                key_lons = [p['longitude'] for p in key_intersections[1:]]
-                key_lats = [p['latitude'] for p in key_intersections[1:]]
-                ax.plot(key_lons, key_lats, 'bo', markersize=8, 
-                       markeredgecolor='darkblue', markeredgewidth=1,
-                       label=f'Key Waypoints ({len(key_intersections)-1})')
-            
-            # Set equal aspect ratio and add grid
+            # Common styling for both versions
             ax.set_aspect('equal')
-            ax.grid(True, alpha=0.3)
             
-            # Labels and title
-            ax.set_xlabel('Longitude')
-            ax.set_ylabel('Latitude')
+            # Title
             ax.set_title(f'Running Route Map - {route_result["stats"]["total_distance_km"]:.2f}km\n'
                         f'Elevation: {min(elevations):.0f}m - {max(elevations):.0f}m '
                         f'(+{route_result["stats"].get("total_elevation_gain_m", 0):.0f}m gain)')
@@ -449,7 +533,7 @@ class RefactoredCLIRoutePlanner:
             cbar.set_label('Elevation (m)')
             
             # Add legend
-            ax.legend(loc='upper right')
+            ax.legend(loc='upper right', facecolor='white', framealpha=0.9)
             
             # Add route statistics text box
             stats_text = f"""Route Statistics:
@@ -461,7 +545,7 @@ Key Waypoints: {len(original_route)}"""
             
             ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
                    fontsize=9, verticalalignment='top',
-                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.9))
             
             plt.tight_layout()
             
@@ -470,15 +554,19 @@ Key Waypoints: {len(original_route)}"""
             plt.savefig(map_file, dpi=300, bbox_inches='tight')
             plt.close()
             
+            osm_status = "with OpenStreetMap background" if use_osm else "with coordinate grid"
             print(f"   ✅ Route map saved: {map_file}")
-            print(f"   📍 Map shows:")
+            print(f"   📍 Map shows ({osm_status}):")
             print(f"   - Route path colored by elevation ({len(detailed_path)} nodes)")
             print(f"   - Start/finish point (green circle)")
             print(f"   - Key waypoints (blue circles)")
             print(f"   - Route statistics and elevation range")
+            if use_osm:
+                print(f"   - OpenStreetMap background with streets, buildings, and labels")
             
-        except ImportError:
-            print("⚠️ Matplotlib not available for map creation")
+        except ImportError as e:
+            print(f"⚠️ Missing dependencies for map creation: {e}")
+            print("   Install with: pip install matplotlib contextily pyproj")
         except Exception as e:
             print(f"❌ Map creation failed: {e}")
 
