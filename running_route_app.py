@@ -113,13 +113,12 @@ def create_base_map(services):
     return m
 
 def create_route_map(services, route_result):
-    """Create map showing the optimized route"""
+    """Create map showing the optimized route following actual roads"""
     if not services or not route_result or not route_result.get('route'):
         return None
     
     network_manager = services['network_manager']
-    graph = services['graph']
-    route = route_result['route']
+    elevation_profiler = services['elevation_profiler']
     
     # Get center coordinates
     center_lat, center_lon = network_manager.center_point
@@ -131,47 +130,62 @@ def create_route_map(services, route_result):
         tiles='OpenStreetMap'
     )
     
-    # Get route coordinates and elevations
-    route_coords = []
-    route_elevations = []
+    # Get detailed route path (follows actual roads)
+    detailed_path = elevation_profiler.get_detailed_route_path(route_result)
     
-    for node in route:
-        if node in graph.nodes:
-            node_data = graph.nodes[node]
-            coord = [node_data['y'], node_data['x']]
-            route_coords.append(coord)
-            route_elevations.append(node_data.get('elevation', 0))
-    
-    # Add route path
-    if route_coords:
-        # Close the loop
-        route_coords_closed = route_coords + [route_coords[0]]
+    if detailed_path:
+        # Convert to coordinates for folium
+        route_coords = [[p['latitude'], p['longitude']] for p in detailed_path]
         
+        # Add route path following roads
         folium.PolyLine(
-            route_coords_closed,
+            locations=route_coords,
             color='red',
-            weight=3,
-            opacity=0.8
+            weight=4,
+            opacity=0.8,
+            popup=f"Running Route - {route_result['stats']['total_distance_km']:.2f}km"
         ).add_to(m)
         
-        # Add markers for route points
-        for i, (coord, elevation) in enumerate(zip(route_coords, route_elevations)):
-            if i == 0:
-                # Start/finish marker
-                folium.Marker(
-                    coord,
-                    popup=f"Start/Finish<br>Elevation: {elevation:.0f}m",
-                    icon=folium.Icon(color='green', icon='play')
-                ).add_to(m)
-            else:
-                # Route point markers
-                folium.CircleMarker(
-                    coord,
-                    radius=5,
-                    popup=f"Point {i+1}<br>Elevation: {elevation:.0f}m",
-                    color='blue',
-                    fill=True
-                ).add_to(m)
+        # Add start/finish marker
+        start_point = detailed_path[0]
+        folium.Marker(
+            location=[start_point['latitude'], start_point['longitude']],
+            popup=f"Start/Finish<br>Node: {start_point['node_id']}<br>Elevation: {start_point['elevation']:.0f}m",
+            icon=folium.Icon(color='green', icon='play')
+        ).add_to(m)
+        
+        # Add key intersection markers (every 20th intersection to avoid clutter)
+        intersections = [p for p in detailed_path if p.get('node_type') == 'intersection']
+        original_route = route_result['route']
+        
+        for i, intersection in enumerate(intersections):
+            # Only show original TSP waypoints + a few intermediate ones
+            if intersection['node_id'] in original_route or i % 20 == 0:
+                if intersection['node_id'] != start_point['node_id']:  # Skip start point
+                    marker_color = 'blue' if intersection['node_id'] in original_route else 'lightblue'
+                    marker_size = 6 if intersection['node_id'] in original_route else 3
+                    
+                    folium.CircleMarker(
+                        location=[intersection['latitude'], intersection['longitude']],
+                        radius=marker_size,
+                        popup=f"{'Key Waypoint' if intersection['node_id'] in original_route else 'Intersection'}<br>Node: {intersection['node_id']}<br>Elevation: {intersection['elevation']:.0f}m",
+                        color=marker_color,
+                        fillColor=marker_color,
+                        fillOpacity=0.7
+                    ).add_to(m)
+        
+        # Add route statistics
+        stats = route_result.get('stats', {})
+        folium.Marker(
+            location=[center_lat + 0.002, center_lon + 0.002],  # Offset for visibility
+            popup=f"""<b>Route Statistics</b><br>
+            Distance: {stats.get('total_distance_km', 0):.2f} km<br>
+            Elevation Gain: {stats.get('total_elevation_gain_m', 0):.0f} m<br>
+            Time Estimate: {stats.get('estimated_time_min', 0):.0f} min<br>
+            Total Path Nodes: {len(detailed_path)}<br>
+            Key Intersections: {len(original_route)}""",
+            icon=folium.Icon(color='gray', icon='info-sign')
+        ).add_to(m)
     
     return m
 
@@ -207,10 +221,21 @@ def create_elevation_plot(services, route_result):
     stats = profile_data.get('elevation_stats', {})
     total_distance = profile_data.get('total_distance_km', 0)
     
+    # Set Y-axis to start from lowest elevation with padding
+    if elevations:
+        min_elev = min(elevations)
+        max_elev = max(elevations)
+        elev_range = max_elev - min_elev
+        padding = max(5, elev_range * 0.1)  # 10% padding or 5m minimum
+        y_range = [min_elev - padding, max_elev + padding]
+    else:
+        y_range = None
+    
     fig.update_layout(
         title=f"Elevation Profile - {total_distance:.2f}km Route",
         xaxis_title="Distance (km)",
         yaxis_title="Elevation (m)",
+        yaxis=dict(range=y_range) if y_range else {},
         hovermode='x unified',
         height=400
     )

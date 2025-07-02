@@ -287,13 +287,21 @@ class RefactoredCLIRoutePlanner:
                 # Create figure with elevation profile
                 fig, ax = plt.subplots(1, 1, figsize=(12, 6))
                 
-                # Elevation profile
+                # Elevation profile with improved Y-axis scaling
                 ax.plot(distances_km, elevations, 'g-', linewidth=2, marker='o', markersize=4)
                 ax.fill_between(distances_km, elevations, alpha=0.3, color='green')
                 ax.set_xlabel('Distance (km)')
                 ax.set_ylabel('Elevation (m)')
                 ax.set_title(f'Elevation Profile - {profile_data.get("total_distance_km", 0):.2f}km Route')
                 ax.grid(True, alpha=0.3)
+                
+                # Set Y-axis to start from lowest elevation with some padding
+                if elevations:
+                    min_elev = min(elevations)
+                    max_elev = max(elevations)
+                    elev_range = max_elev - min_elev
+                    padding = max(5, elev_range * 0.1)  # 10% padding or 5m minimum
+                    ax.set_ylim(min_elev - padding, max_elev + padding)
                 
                 plt.tight_layout()
                 
@@ -366,6 +374,113 @@ class RefactoredCLIRoutePlanner:
             
         except Exception as e:
             print(f"❌ Route export failed: {e}")
+    
+    def create_route_map_png(self, route_result, start_node, target_distance):
+        """Create static PNG map with route overlay
+        
+        Args:
+            route_result: Route result from optimizer
+            start_node: Starting node ID  
+            target_distance: Target distance in km
+        """
+        if not self.services or not route_result:
+            return
+        
+        elevation_profiler = self.services['elevation_profiler']
+        
+        print(f"\n🗺️ Creating route map...")
+        
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Get detailed path
+            detailed_path = elevation_profiler.get_detailed_route_path(route_result)
+            
+            if not detailed_path:
+                print("❌ No detailed path data available")
+                return
+            
+            # Extract coordinates
+            lats = [p['latitude'] for p in detailed_path]
+            lons = [p['longitude'] for p in detailed_path]
+            elevations = [p['elevation'] for p in detailed_path]
+            
+            # Create figure with map
+            fig, ax = plt.subplots(1, 1, figsize=(12, 10))
+            
+            # Plot route path with elevation-based coloring
+            scatter = ax.scatter(lons, lats, c=elevations, cmap='terrain', 
+                               s=8, alpha=0.8, edgecolors='none')
+            
+            # Add route line
+            ax.plot(lons, lats, 'r-', linewidth=2, alpha=0.7, label=f'Route ({route_result["stats"]["total_distance_km"]:.2f}km)')
+            
+            # Mark start/finish point
+            if detailed_path:
+                start_point = detailed_path[0]
+                ax.plot(start_point['longitude'], start_point['latitude'], 
+                       'go', markersize=12, markeredgecolor='darkgreen', 
+                       markeredgewidth=2, label='Start/Finish')
+            
+            # Mark key intersections (original TSP waypoints)
+            original_route = route_result['route']
+            key_intersections = [p for p in detailed_path if p['node_id'] in original_route]
+            if len(key_intersections) > 1:  # Exclude start point
+                key_lons = [p['longitude'] for p in key_intersections[1:]]
+                key_lats = [p['latitude'] for p in key_intersections[1:]]
+                ax.plot(key_lons, key_lats, 'bo', markersize=8, 
+                       markeredgecolor='darkblue', markeredgewidth=1,
+                       label=f'Key Waypoints ({len(key_intersections)-1})')
+            
+            # Set equal aspect ratio and add grid
+            ax.set_aspect('equal')
+            ax.grid(True, alpha=0.3)
+            
+            # Labels and title
+            ax.set_xlabel('Longitude')
+            ax.set_ylabel('Latitude')
+            ax.set_title(f'Running Route Map - {route_result["stats"]["total_distance_km"]:.2f}km\n'
+                        f'Elevation: {min(elevations):.0f}m - {max(elevations):.0f}m '
+                        f'(+{route_result["stats"].get("total_elevation_gain_m", 0):.0f}m gain)')
+            
+            # Add colorbar for elevation
+            cbar = plt.colorbar(scatter, ax=ax, shrink=0.8)
+            cbar.set_label('Elevation (m)')
+            
+            # Add legend
+            ax.legend(loc='upper right')
+            
+            # Add route statistics text box
+            stats_text = f"""Route Statistics:
+Distance: {route_result["stats"]["total_distance_km"]:.2f} km
+Elevation Gain: {route_result["stats"].get("total_elevation_gain_m", 0):.0f} m
+Est. Time: {route_result["stats"].get("estimated_time_min", 0):.0f} min
+Path Detail: {len(detailed_path)} nodes
+Key Waypoints: {len(original_route)}"""
+            
+            ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+                   fontsize=9, verticalalignment='top',
+                   bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+            
+            plt.tight_layout()
+            
+            # Save map
+            map_file = f"route_{start_node}_{target_distance}km_map.png"
+            plt.savefig(map_file, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"   ✅ Route map saved: {map_file}")
+            print(f"   📍 Map shows:")
+            print(f"   - Route path colored by elevation ({len(detailed_path)} nodes)")
+            print(f"   - Start/finish point (green circle)")
+            print(f"   - Key waypoints (blue circles)")
+            print(f"   - Route statistics and elevation range")
+            
+        except ImportError:
+            print("⚠️ Matplotlib not available for map creation")
+        except Exception as e:
+            print(f"❌ Map creation failed: {e}")
 
 
 def interactive_mode():
@@ -481,12 +596,16 @@ def interactive_mode():
                         # Ask for visualizations
                         viz_input = input("\nCreate route visualizations? (y/n): ").strip().lower()
                         if viz_input in ['y', 'yes']:
-                            save_file = f"route_{start_node}_{target_distance}km.png"
-                            planner.create_route_visualization(result, save_file)
+                            # Elevation profile
+                            elevation_file = f"route_{start_node}_{target_distance}km_elevation.png"
+                            planner.create_route_visualization(result, elevation_file)
                             
-                            # Ask for map export
-                            map_input = input("Export route for mapping (GeoJSON/GPX)? (y/n): ").strip().lower()
-                            if map_input in ['y', 'yes']:
+                            # Route map
+                            planner.create_route_map_png(result, start_node, target_distance)
+                            
+                            # Ask for file exports
+                            export_input = input("\nExport route files (GeoJSON/GPX)? (y/n): ").strip().lower()
+                            if export_input in ['y', 'yes']:
                                 planner.export_route_for_mapping(result, start_node, target_distance)
                 
                 except KeyboardInterrupt:
