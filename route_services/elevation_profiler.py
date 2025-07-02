@@ -18,6 +18,7 @@ class ElevationProfiler:
             graph: NetworkX graph with elevation data
         """
         self.graph = graph
+        self._distance_cache = {}  # Cache for network distances
     
     def generate_profile_data(self, route_result: Dict[str, Any]) -> Dict[str, Any]:
         """Generate elevation profile data for a route
@@ -55,24 +56,16 @@ class ElevationProfiler:
                 coordinates.append(coordinate)
                 elevations.append(data.get('elevation', 0))
                 
-                # Calculate cumulative distance
+                # Calculate cumulative distance using road network paths (same as TSP solver)
                 if i > 0:
-                    prev_data = self.graph.nodes[route[i-1]]
-                    segment_dist = haversine_distance(
-                        prev_data['y'], prev_data['x'],
-                        data['y'], data['x']
-                    )
+                    prev_node = route[i-1]
+                    segment_dist = self._get_network_distance(prev_node, node)
                     cumulative_distance += segment_dist
                     distances.append(cumulative_distance)
         
         # Add return to start for complete loop
-        if len(route) > 1 and route[0] in self.graph.nodes and route[-1] in self.graph.nodes:
-            start_data = self.graph.nodes[route[0]]
-            end_data = self.graph.nodes[route[-1]]
-            return_dist = haversine_distance(
-                end_data['y'], end_data['x'],
-                start_data['y'], start_data['x']
-            )
+        if len(route) > 1:
+            return_dist = self._get_network_distance(route[-1], route[0])
             cumulative_distance += return_dist
             distances.append(cumulative_distance)
             elevations.append(elevations[0])  # Back to start elevation
@@ -316,3 +309,125 @@ class ElevationProfiler:
                 climbing_segments.append(current_segment)
         
         return climbing_segments
+    
+    def _get_network_distance(self, u: int, v: int) -> float:
+        """Get distance between two nodes using road network paths (same as TSP solver)"""
+        if u == v:
+            return 0
+        
+        # Check cache first
+        cache_key = (min(u, v), max(u, v))
+        if cache_key in self._distance_cache:
+            return self._distance_cache[cache_key]
+        
+        # Compute distance using shortest path (same method as TSP solver)
+        try:
+            path = nx.shortest_path(self.graph, u, v, weight='length')
+            total_distance = 0
+            
+            for i in range(len(path) - 1):
+                edge_data = self.graph.get_edge_data(path[i], path[i+1])
+                if edge_data:
+                    if isinstance(edge_data, dict) and 0 in edge_data:
+                        edge_data = edge_data[0]
+                    total_distance += edge_data.get('length', float('inf'))
+            
+            # Cache the result
+            self._distance_cache[cache_key] = total_distance
+            return total_distance
+            
+        except nx.NetworkXNoPath:
+            return float('inf')
+    
+    def get_detailed_route_path(self, route_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get detailed route path including all intermediate nodes along roads
+        
+        Args:
+            route_result: Route result from optimizer
+            
+        Returns:
+            List of coordinate dictionaries for complete route path
+        """
+        if not route_result or not route_result.get('route'):
+            return []
+        
+        route = route_result['route']
+        detailed_path = []
+        
+        # Add starting node
+        if route[0] in self.graph.nodes:
+            start_data = self.graph.nodes[route[0]]
+            detailed_path.append({
+                'latitude': start_data['y'],
+                'longitude': start_data['x'],
+                'node_id': route[0],
+                'elevation': start_data.get('elevation', 0),
+                'node_type': 'intersection'
+            })
+        
+        # Add all intermediate nodes for each segment
+        for i in range(len(route) - 1):
+            current_node = route[i]
+            next_node = route[i + 1]
+            
+            # Get shortest path between intersections
+            try:
+                path = nx.shortest_path(self.graph, current_node, next_node, weight='length')
+                
+                # Add all intermediate nodes (skip first node as it's already added)
+                for j in range(1, len(path)):
+                    node_id = path[j]
+                    if node_id in self.graph.nodes:
+                        node_data = self.graph.nodes[node_id]
+                        detailed_path.append({
+                            'latitude': node_data['y'],
+                            'longitude': node_data['x'],
+                            'node_id': node_id,
+                            'elevation': node_data.get('elevation', 0),
+                            'node_type': 'intersection' if self.graph.degree(node_id) != 2 else 'geometry'
+                        })
+            except nx.NetworkXNoPath:
+                # If no path found, just connect with straight line (fallback)
+                if next_node in self.graph.nodes:
+                    next_data = self.graph.nodes[next_node]
+                    detailed_path.append({
+                        'latitude': next_data['y'],
+                        'longitude': next_data['x'],
+                        'node_id': next_node,
+                        'elevation': next_data.get('elevation', 0),
+                        'node_type': 'intersection'
+                    })
+        
+        # Add return path to start
+        if len(route) > 1:
+            last_node = route[-1]
+            start_node = route[0]
+            
+            try:
+                path = nx.shortest_path(self.graph, last_node, start_node, weight='length')
+                
+                # Add intermediate nodes for return path (skip first node)
+                for j in range(1, len(path)):
+                    node_id = path[j]
+                    if node_id in self.graph.nodes:
+                        node_data = self.graph.nodes[node_id]
+                        detailed_path.append({
+                            'latitude': node_data['y'],
+                            'longitude': node_data['x'],
+                            'node_id': node_id,
+                            'elevation': node_data.get('elevation', 0),
+                            'node_type': 'intersection' if self.graph.degree(node_id) != 2 else 'geometry'
+                        })
+            except nx.NetworkXNoPath:
+                # Fallback: return to start
+                if start_node in self.graph.nodes:
+                    start_data = self.graph.nodes[start_node]
+                    detailed_path.append({
+                        'latitude': start_data['y'],
+                        'longitude': start_data['x'],
+                        'node_id': start_node,
+                        'elevation': start_data.get('elevation', 0),
+                        'node_type': 'intersection'
+                    })
+        
+        return detailed_path

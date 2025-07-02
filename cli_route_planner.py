@@ -92,7 +92,7 @@ class RefactoredCLIRoutePlanner:
             radius_km=0.5, max_nodes=num_points
         )
         
-        print(f"\\n📍 Available Starting Points (showing {len(nearby_nodes)}):")
+        print(f"\n📍 Available Starting Points (showing {len(nearby_nodes)}):")
         print("-" * 70)
         print(f"{'#':<3} {'Node ID':<12} {'Latitude':<12} {'Longitude':<12} {'Elevation':<10}")
         print("-" * 70)
@@ -129,7 +129,7 @@ class RefactoredCLIRoutePlanner:
         
         while True:
             try:
-                user_input = input(f"\\nSelect starting point (1-{len(available_nodes)} or node ID, 'back' to return): ").strip()
+                user_input = input(f"\nSelect starting point (1-{len(available_nodes)} or node ID, 'back' to return): ").strip()
                 
                 if user_input.lower() in ['back', '']:
                     return None
@@ -166,7 +166,7 @@ class RefactoredCLIRoutePlanner:
                 return selected_node
                 
             except KeyboardInterrupt:
-                print("\\n⏹️ Selection cancelled")
+                print("\n⏹️ Selection cancelled")
                 return None
     
     def generate_route(self, start_node, target_distance, objective=None, algorithm="nearest_neighbor"):
@@ -191,7 +191,7 @@ class RefactoredCLIRoutePlanner:
         if objective is None:
             objective = route_optimizer.RouteObjective.MINIMIZE_DISTANCE
         
-        print(f"\\n🚀 Generating optimized route...")
+        print(f"\n🚀 Generating optimized route...")
         print(f"   Start: Node {start_node}")
         print(f"   Target distance: {target_distance:.1f}km")
         print(f"   Algorithm: {algorithm}")
@@ -263,7 +263,7 @@ class RefactoredCLIRoutePlanner:
         
         elevation_profiler = self.services['elevation_profiler']
         
-        print(f"\\n📈 Creating route visualization...")
+        print(f"\n📈 Creating route visualization...")
         
         try:
             # Generate elevation profile data
@@ -310,6 +310,62 @@ class RefactoredCLIRoutePlanner:
                 
         except Exception as e:
             print(f"❌ Profile generation failed: {e}")
+    
+    def export_route_for_mapping(self, route_result, start_node, target_distance):
+        """Export route with detailed path for mapping applications
+        
+        Args:
+            route_result: Route result from optimizer
+            start_node: Starting node ID
+            target_distance: Target distance in km
+        """
+        if not self.services or not route_result:
+            return
+        
+        elevation_profiler = self.services['elevation_profiler']
+        route_formatter = self.services['route_formatter']
+        
+        print(f"\n🗺️ Exporting route for mapping...")
+        
+        try:
+            # Get detailed path with all intermediate nodes
+            detailed_path = elevation_profiler.get_detailed_route_path(route_result)
+            
+            if not detailed_path:
+                print("❌ No detailed path data available")
+                return
+            
+            # Count node types
+            intersections = len([p for p in detailed_path if p.get('node_type') == 'intersection'])
+            geometry_nodes = len([p for p in detailed_path if p.get('node_type') == 'geometry'])
+            
+            print(f"   Detailed path: {len(detailed_path)} total nodes")
+            print(f"   - {intersections} intersections")
+            print(f"   - {geometry_nodes} geometry nodes")
+            
+            # Export GeoJSON
+            geojson_file = f"route_{start_node}_{target_distance}km.geojson"
+            geojson_data = route_formatter.export_route_geojson(route_result, detailed_path)
+            
+            with open(geojson_file, 'w') as f:
+                f.write(geojson_data)
+            print(f"   ✅ Saved GeoJSON: {geojson_file}")
+            
+            # Export GPX
+            gpx_file = f"route_{start_node}_{target_distance}km.gpx"
+            gpx_data = route_formatter.export_route_gpx(route_result, detailed_path)
+            
+            with open(gpx_file, 'w') as f:
+                f.write(gpx_data)
+            print(f"   ✅ Saved GPX: {gpx_file}")
+            
+            print(f"\n📍 Map visualization files created:")
+            print(f"   • {geojson_file} - Import into web mapping tools (Leaflet, Mapbox, etc.)")
+            print(f"   • {gpx_file} - Import into GPS devices or apps like Strava/Garmin")
+            print(f"   These files follow the actual road paths, not straight lines!")
+            
+        except Exception as e:
+            print(f"❌ Route export failed: {e}")
 
 
 def interactive_mode():
@@ -334,18 +390,18 @@ def interactive_mode():
             
             if network_manager.validate_node_exists(graph, planner.selected_start_node):
                 node_info = network_manager.get_node_info(graph, planner.selected_start_node)
-                print(f"\\n📍 Current starting point: Node {node_info['node_id']}")
+                print(f"\n📍 Current starting point: Node {node_info['node_id']}")
                 print(f"   Location: {node_info['latitude']:.6f}, {node_info['longitude']:.6f}")
                 print(f"   Elevation: {node_info['elevation']:.0f}m")
         
-        print(f"\\n📋 Main Menu:")
+        print(f"\n📋 Main Menu:")
         print("1. Select starting point")
         print("2. Generate route" + (" (with selected point)" if planner.selected_start_node else " (manual entry)"))
         print("3. Show solver information")
         print("4. Quit")
         
         try:
-            choice = input("\\nSelect option (1-4): ").strip()
+            choice = input("\nSelect option (1-4): ").strip()
             
             if choice == '1':
                 planner.select_starting_point()
@@ -359,7 +415,7 @@ def interactive_mode():
                         print(f"✅ Using selected starting point: Node {start_node}")
                     else:
                         available_nodes = planner.list_starting_points(10)
-                        start_input = input("\\nEnter starting node (option number or node ID): ").strip()
+                        start_input = input("\nEnter starting node (option number or node ID): ").strip()
                         
                         try:
                             input_num = int(start_input)
@@ -389,7 +445,7 @@ def interactive_mode():
                         continue
                     
                     # Get route objective
-                    print("\\nObjective options:")
+                    print("\nObjective options:")
                     objectives = route_optimizer.get_available_objectives()
                     obj_list = list(objectives.items())
                     
@@ -418,23 +474,28 @@ def interactive_mode():
                         planner.display_route_stats(result)
                         
                         # Ask for directions
-                        directions_input = input("\\nShow turn-by-turn directions? (y/n): ").strip().lower()
+                        directions_input = input("\nShow turn-by-turn directions? (y/n): ").strip().lower()
                         if directions_input in ['y', 'yes']:
                             planner.generate_directions(result)
                         
-                        # Ask for visualization
-                        viz_input = input("\\nCreate route visualization? (y/n): ").strip().lower()
+                        # Ask for visualizations
+                        viz_input = input("\nCreate route visualizations? (y/n): ").strip().lower()
                         if viz_input in ['y', 'yes']:
                             save_file = f"route_{start_node}_{target_distance}km.png"
                             planner.create_route_visualization(result, save_file)
+                            
+                            # Ask for map export
+                            map_input = input("Export route for mapping (GeoJSON/GPX)? (y/n): ").strip().lower()
+                            if map_input in ['y', 'yes']:
+                                planner.export_route_for_mapping(result, start_node, target_distance)
                 
                 except KeyboardInterrupt:
-                    print("\\n⏹️ Operation cancelled")
+                    print("\n⏹️ Operation cancelled")
                 
             elif choice == '3':
                 # Show solver information
                 solver_info = route_optimizer.get_solver_info()
-                print("\\n🔧 Solver Information:")
+                print("\n🔧 Solver Information:")
                 print(f"   Type: {solver_info['solver_type']}")
                 print(f"   Class: {solver_info['solver_class']}")
                 print(f"   Graph nodes: {solver_info['graph_nodes']}")
@@ -449,10 +510,10 @@ def interactive_mode():
                 print("❌ Invalid choice")
                 
         except KeyboardInterrupt:
-            print("\\n👋 Goodbye!")
+            print("\n👋 Goodbye!")
             break
         except EOFError:
-            print("\\n👋 Goodbye!")
+            print("\n👋 Goodbye!")
             break
 
 

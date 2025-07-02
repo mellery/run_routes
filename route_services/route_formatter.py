@@ -310,3 +310,105 @@ class RouteFormatter:
             'color': color_map.get(rating, '#9E9E9E'),
             'description': f"Difficulty: {rating} ({score:.0f}/100)"
         }
+    
+    def export_route_geojson(self, route_result: Dict[str, Any], detailed_path: List[Dict[str, Any]]) -> str:
+        """Export route as GeoJSON for mapping applications
+        
+        Args:
+            route_result: Route result from optimizer
+            detailed_path: Detailed path with all intermediate nodes
+            
+        Returns:
+            GeoJSON string representing the complete route path
+        """
+        import json
+        
+        if not detailed_path:
+            return json.dumps({
+                "type": "FeatureCollection",
+                "features": []
+            })
+        
+        # Create LineString geometry from detailed path
+        coordinates = []
+        for point in detailed_path:
+            # GeoJSON uses [longitude, latitude] format
+            coordinates.append([point['longitude'], point['latitude']])
+        
+        # Route stats
+        stats = route_result.get('stats', {}) if route_result else {}
+        
+        # Create GeoJSON feature
+        feature = {
+            "type": "Feature",
+            "properties": {
+                "name": "Running Route",
+                "distance_km": stats.get('total_distance_km', 0),
+                "elevation_gain_m": stats.get('total_elevation_gain_m', 0),
+                "estimated_time_min": stats.get('estimated_time_min', 0),
+                "route_type": "circular",
+                "total_nodes": len(detailed_path),
+                "intersection_count": len([p for p in detailed_path if p.get('node_type') == 'intersection']),
+                "geometry_nodes": len([p for p in detailed_path if p.get('node_type') == 'geometry'])
+            },
+            "geometry": {
+                "type": "LineString",
+                "coordinates": coordinates
+            }
+        }
+        
+        geojson = {
+            "type": "FeatureCollection",
+            "features": [feature]
+        }
+        
+        return json.dumps(geojson, indent=2)
+    
+    def export_route_gpx(self, route_result: Dict[str, Any], detailed_path: List[Dict[str, Any]]) -> str:
+        """Export route as GPX for GPS devices
+        
+        Args:
+            route_result: Route result from optimizer
+            detailed_path: Detailed path with all intermediate nodes
+            
+        Returns:
+            GPX XML string
+        """
+        from datetime import datetime
+        
+        if not detailed_path:
+            return '<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1"></gpx>'
+        
+        # Route stats
+        stats = route_result.get('stats', {}) if route_result else {}
+        
+        gpx_header = '''<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="RunningRouteOptimizer" xmlns="http://www.topografix.com/GPX/1/1">
+  <metadata>
+    <name>Running Route</name>
+    <time>{timestamp}</time>
+    <desc>Optimized running route - {distance:.2f}km, {elevation_gain}m elevation gain</desc>
+  </metadata>
+  <trk>
+    <name>Running Route</name>
+    <type>running</type>
+    <trkseg>'''.format(
+            timestamp=datetime.now().isoformat(),
+            distance=stats.get('total_distance_km', 0),
+            elevation_gain=stats.get('total_elevation_gain_m', 0)
+        )
+        
+        gpx_points = []
+        for point in detailed_path:
+            gpx_points.append(
+                f'      <trkpt lat="{point["latitude"]}" lon="{point["longitude"]}">\n'
+                f'        <ele>{point.get("elevation", 0)}</ele>\n'
+                f'      </trkpt>'
+            )
+        
+        gpx_footer = '''
+    </trkseg>
+  </trk>
+</gpx>'''
+        
+        return gpx_header + '\n' + '\n'.join(gpx_points) + gpx_footer

@@ -163,8 +163,8 @@ class FastNearestNeighborTSP(FastTSPSolver):
         return route, cost
     
     def _get_closest_nodes(self, max_nodes: int, candidate_nodes=None) -> List[int]:
-        """Get the closest N nodes to the start node"""
-        print(f"  Finding {max_nodes} closest nodes to start...")
+        """Get nodes distributed at various distances from start node (not just closest)"""
+        print(f"  Finding {max_nodes} distributed nodes around start...")
         
         # Use provided candidate nodes if available, otherwise use all nodes
         if candidate_nodes:
@@ -184,8 +184,28 @@ class FastNearestNeighborTSP(FastTSPSolver):
             distances.append((node, distance))
         
         distances.sort(key=lambda x: x[1])
-        result = [n for n, d in distances[:max_nodes]]
-        print(f"  ✅ Found {len(result)} closest nodes")
+        
+        # Instead of just taking closest nodes, distribute selection across distance ranges
+        # This helps create longer, more circular routes
+        if len(distances) > max_nodes * 3:
+            # Divide nodes into distance bands and select from each band
+            total_nodes = len(distances)
+            band_size = total_nodes // max_nodes
+            result = []
+            
+            for i in range(max_nodes):
+                start_idx = i * band_size
+                end_idx = min((i + 1) * band_size, total_nodes)
+                if start_idx < len(distances):
+                    # Take first node from this distance band
+                    result.append(distances[start_idx][0])
+            
+            print(f"  ✅ Found {len(result)} distributed nodes across distance bands")
+        else:
+            # Not enough nodes for banding, just take closest
+            result = [n for n, d in distances[:max_nodes]]
+            print(f"  ✅ Found {len(result)} closest nodes (not enough for distribution)")
+        
         return result
 
 class FastDistanceConstrainedTSP(FastTSPSolver):
@@ -195,16 +215,21 @@ class FastDistanceConstrainedTSP(FastTSPSolver):
                  tolerance: float = 0.15, objective: str = RouteObjective.MINIMIZE_DISTANCE):
         super().__init__(graph, start_node, objective)
         self.target_distance_m = target_distance_km * 1000
-        self.tolerance = tolerance
-        self.min_distance = self.target_distance_m * (1 - tolerance)
-        self.max_distance = self.target_distance_m * (1 + tolerance)
+        self.target_distance_km = target_distance_km
+        
+        # Use progressive tolerance for longer routes (more lenient for longer distances)
+        adjusted_tolerance = min(0.3, tolerance + (target_distance_km - 1) * 0.02)
+        self.tolerance = adjusted_tolerance
+        self.min_distance = self.target_distance_m * (1 - adjusted_tolerance)
+        self.max_distance = self.target_distance_m * (1 + adjusted_tolerance)
     
     def solve(self, algorithm: str = "nearest_neighbor") -> Tuple[List[int], float]:
         """Solve distance-constrained TSP"""
         print(f"  Target distance: {self.target_distance_m/1000:.2f}km (±{self.tolerance*100:.0f}%)")
         
         # Get candidate nodes within reasonable distance
-        max_radius_km = self.target_distance_m / 2000  # Conservative estimate
+        # Less conservative radius for longer routes to ensure enough nodes
+        max_radius_km = min(self.target_distance_km * 0.8, self.target_distance_m / 1500)
         print(f"  Finding nodes within {max_radius_km:.1f}km radius...")
         candidate_nodes = self._get_nodes_in_radius(max_radius_km)
         print(f"  Found {len(candidate_nodes)} candidate nodes")
@@ -215,7 +240,9 @@ class FastDistanceConstrainedTSP(FastTSPSolver):
         best_route = None
         best_cost = float('inf')
         
-        max_nodes_to_try = min(len(candidate_nodes) + 1, 12)  # Reduced for performance
+        # Adaptive max nodes based on target distance (more nodes for longer routes)
+        adaptive_max = max(15, min(25, int(self.target_distance_km * 3)))
+        max_nodes_to_try = min(len(candidate_nodes) + 1, adaptive_max)
         print(f"  Trying different route sizes (3 to {max_nodes_to_try-1} nodes)...")
         
         for num_nodes in range(3, max_nodes_to_try):
@@ -249,11 +276,29 @@ class FastDistanceConstrainedTSP(FastTSPSolver):
                 continue
         
         if best_route is None:
-            # Fallback: return a simple route
-            print(f"  ⚠️ No route found within distance constraints, using fallback...")
+            # Fallback: return a route with adaptive size based on target distance
+            fallback_nodes = max(10, min(30, int(self.target_distance_km * 4)))
+            print(f"  ⚠️ No route found within distance constraints, using fallback with {fallback_nodes} nodes...")
             solver = FastNearestNeighborTSP(self.graph, self.start_node, self.objective)
-            best_route, best_cost = solver.solve(max_nodes=5)
-            print(f"  📍 Fallback route generated with 5 nodes")
+            best_route, best_cost = solver.solve(max_nodes=fallback_nodes)
+            
+            # Check if fallback route is at least reasonable (>20% of target)
+            fallback_stats = self.get_route_stats(best_route)
+            fallback_distance = fallback_stats.get('total_distance_km', 0)
+            if fallback_distance < self.target_distance_km * 0.2:
+                print(f"  ⚠️ Fallback route too short ({fallback_distance:.2f}km), trying larger radius...")
+                # Try with expanded search radius
+                expanded_radius = max_radius_km * 1.5
+                expanded_candidates = self._get_nodes_in_radius(expanded_radius)
+                if len(expanded_candidates) > len(candidate_nodes):
+                    solver.candidate_nodes = expanded_candidates
+                    best_route, best_cost = solver.solve(max_nodes=min(40, len(expanded_candidates)))
+                    expanded_stats = self.get_route_stats(best_route)
+                    print(f"  📍 Expanded fallback route: {expanded_stats.get('total_distance_km', 0):.2f}km with {len(best_route)} nodes")
+                else:
+                    print(f"  📍 Standard fallback route: {fallback_distance:.2f}km with {len(best_route)} nodes")
+            else:
+                print(f"  📍 Fallback route generated: {fallback_distance:.2f}km with {len(best_route)} nodes")
         
         return best_route, best_cost
     

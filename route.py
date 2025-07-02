@@ -172,7 +172,7 @@ def add_running_weights(graph, elevation_weight=0.1, grade_penalty=2.0):
 
 # Function to get nodes within a certain distance of a starting point
 def get_nodes_within_distance(graph, start_node, max_distance_km):
-    """Get all nodes within max_distance_km of the start_node"""
+    """Get intersection nodes within max_distance_km of the start_node"""
     if start_node not in graph.nodes:
         print(f"Start node {start_node} not found in graph")
         return []
@@ -187,12 +187,18 @@ def get_nodes_within_distance(graph, start_node, max_distance_km):
         if node_id == start_node:
             nearby_nodes.append(node_id)
             continue
+        
+        # Only include intersection nodes (degree > 2) or important endpoints (degree == 1)
+        # Skip geometry nodes (degree == 2) which are just points along road segments
+        node_degree = graph.degree(node_id)
+        if node_degree == 2:
+            continue
             
         distance = haversine_distance(start_lat, start_lon, node_data['y'], node_data['x'])
         if distance <= max_distance_m:
             nearby_nodes.append(node_id)
     
-    print(f"Found {len(nearby_nodes)} nodes within {max_distance_km}km of start node")
+    print(f"Found {len(nearby_nodes)} intersection nodes within {max_distance_km}km of start node")
     return nearby_nodes
 
 # Function to create a subgraph with nodes within a certain distance
