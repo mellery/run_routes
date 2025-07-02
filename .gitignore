@@ -6,3 +6,4 @@ examples/
 srtm_20_05.hdr
 srtm_20_05.tfw
 srtm_20_05.tif
+tests/archive/

@@ -307,7 +307,7 @@ class TestRouteFormatter(unittest.TestCase):
         self.assertEqual(badge['score'], '0/100')
         self.assertEqual(badge['color'], '#9E9E9E')
     
-    @patch('route_services.route_formatter.datetime')
+    @patch('datetime.datetime')
     def test_get_timestamp(self, mock_datetime):
         """Test timestamp generation"""
         mock_datetime.now.return_value.isoformat.return_value = '2023-12-01T12:00:00'

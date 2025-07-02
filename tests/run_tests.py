@@ -83,6 +83,38 @@ def run_integration_tests():
         return None
 
 
+def run_smoke_tests():
+    """Run smoke tests with real dependencies"""
+    print("🔥 Running Smoke Tests (Real Dependencies)")
+    print("=" * 50)
+    
+    missing_deps = check_dependencies()
+    if missing_deps:
+        print(f"❌ Missing dependencies: {', '.join(missing_deps)}")
+        print("📋 Install with: pip install networkx osmnx numpy matplotlib pandas")
+        return None
+    
+    try:
+        # Import and run smoke tests
+        import importlib.util
+        import os
+        smoke_path = os.path.join(os.path.dirname(__file__), "smoke_tests.py")
+        spec = importlib.util.spec_from_file_location("smoke_tests", smoke_path)
+        smoke_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smoke_module)
+        
+        loader = unittest.TestLoader()
+        suite = loader.loadTestsFromModule(smoke_module)
+        
+        runner = unittest.TextTestRunner(verbosity=2, buffer=True)
+        result = runner.run(suite)
+        
+        return result
+    except Exception as e:
+        print(f"❌ Failed to run smoke tests: {e}")
+        return None
+
+
 def print_test_summary(result, test_type="tests"):
     """Print test summary"""
     if result is None:
@@ -149,11 +181,21 @@ def main():
         else:
             all_success = False
     
-    if test_type not in ['unit', 'integration', 'all']:
-        print("Usage: python run_tests.py [unit|integration|all]")
+    if test_type in ['smoke', 'all']:
+        # Run smoke tests if dependencies available
+        result = run_smoke_tests()
+        if result:
+            success = print_test_summary(result, "smoke tests")
+            all_success = all_success and success
+        else:
+            all_success = False
+    
+    if test_type not in ['unit', 'integration', 'smoke', 'all']:
+        print("Usage: python run_tests.py [unit|integration|smoke|all]")
         print("\nTest types:")
-        print("  unit        - Run unit tests (requires networkx, osmnx, etc.)")
-        print("  integration - Run integration tests (requires networkx, osmnx, etc.)")
+        print("  unit        - Run unit tests (mocked, fast)")
+        print("  integration - Run integration tests (mocked)")
+        print("  smoke       - Run smoke tests (real dependencies, slower)")
         print("  all         - Run all available tests")
         print("\nDefault: unit")
         return

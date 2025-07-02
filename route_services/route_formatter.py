@@ -160,7 +160,7 @@ class RouteFormatter:
             lines.append(f"{step}. {instruction}")
             lines.append(f"   Elevation: {elevation:.0f}m ({elevation_change:+.0f}m)")
             lines.append(f"   Distance: {cumulative_distance:.2f} km")
-            lines.append()
+            lines.append("")
         
         lines.append("=" * 60)
         

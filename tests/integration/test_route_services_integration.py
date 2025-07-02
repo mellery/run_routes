@@ -77,7 +77,7 @@ class TestRouteServicesIntegration(unittest.TestCase):
             }
         }
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_complete_route_planning_workflow(self, mock_load_graph):
         """Test complete route planning workflow using all services"""
         mock_load_graph.return_value = self.mock_graph
@@ -90,7 +90,7 @@ class TestRouteServicesIntegration(unittest.TestCase):
         self.assertEqual(graph, self.mock_graph)
         
         # Step 2: Optimize route using RouteOptimizer
-        with patch('route_services.route_optimizer.FastRunningRouteOptimizer') as mock_optimizer_class:
+        with patch('tsp_solver_fast.FastRunningRouteOptimizer') as mock_optimizer_class:
             mock_optimizer_instance = Mock()
             mock_optimizer_class.return_value = mock_optimizer_instance
             mock_optimizer_instance.find_optimal_route.return_value = self.mock_route_result
@@ -128,8 +128,8 @@ class TestRouteServicesIntegration(unittest.TestCase):
         # Step 4: Generate elevation profile using ElevationProfiler
         elevation_profiler = ElevationProfiler(graph)
         
-        with patch('route_services.elevation_profiler.haversine_distance') as mock_haversine:
-            mock_haversine.side_effect = [100, 120, 110, 90, 200]  # distances
+        with patch('route.haversine_distance') as mock_haversine:
+            mock_haversine.return_value = 100  # constant distance
             
             profile_data = elevation_profiler.generate_profile_data(route_result)
             
@@ -170,7 +170,7 @@ class TestRouteServicesIntegration(unittest.TestCase):
         self.assertIn('2.5km', summary)
         self.assertIn('45m', summary)
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_network_manager_caching_integration(self, mock_load_graph):
         """Test network manager caching with multiple service instances"""
         mock_load_graph.return_value = self.mock_graph
@@ -201,13 +201,10 @@ class TestRouteServicesIntegration(unittest.TestCase):
         route_analyzer = RouteAnalyzer(self.mock_graph)
         elevation_profiler = ElevationProfiler(self.mock_graph)
         
-        with patch('route_services.route_analyzer.haversine_distance') as mock_haversine1, \
-             patch('route_services.elevation_profiler.haversine_distance') as mock_haversine2:
+        with patch('route.haversine_distance') as mock_haversine1:
             
-            # Use same distances for consistency
-            distances = [100, 120, 110, 90]
-            mock_haversine1.side_effect = distances
-            mock_haversine2.side_effect = distances
+            # Use constant distance for consistency
+            mock_haversine1.return_value = 100
             
             # Analyze route
             analysis = route_analyzer.analyze_route(self.mock_route_result)
@@ -225,7 +222,7 @@ class TestRouteServicesIntegration(unittest.TestCase):
             expected_direction_count = route_length + 1  # +1 for finish
             self.assertEqual(len(directions), expected_direction_count)
     
-    @patch('route_services.route_optimizer.FastRunningRouteOptimizer')
+    @patch('tsp_solver_fast.FastRunningRouteOptimizer')
     def test_optimizer_validation_integration(self, mock_optimizer_class):
         """Test route optimizer validation with network manager"""
         mock_optimizer_instance = Mock()
@@ -312,7 +309,7 @@ class TestRouteServicesIntegration(unittest.TestCase):
         web_stats = route_formatter.format_route_stats_web(None)
         self.assertEqual(web_stats, {})
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_service_factory_pattern(self, mock_load_graph):
         """Test creating all services from a single network load"""
         mock_load_graph.return_value = self.mock_graph

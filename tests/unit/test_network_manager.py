@@ -42,7 +42,7 @@ class TestNetworkManager(unittest.TestCase):
         manager = NetworkManager(center_point=custom_center)
         self.assertEqual(manager.center_point, custom_center)
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_load_network_success(self, mock_load_graph):
         """Test successful network loading"""
         mock_load_graph.return_value = self.mock_graph
@@ -56,7 +56,7 @@ class TestNetworkManager(unittest.TestCase):
             network_type='all'
         )
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_load_network_failure(self, mock_load_graph):
         """Test network loading failure"""
         mock_load_graph.return_value = None
@@ -65,7 +65,7 @@ class TestNetworkManager(unittest.TestCase):
         
         self.assertIsNone(result)
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_load_network_exception(self, mock_load_graph):
         """Test network loading with exception"""
         mock_load_graph.side_effect = Exception("Network error")
@@ -74,7 +74,7 @@ class TestNetworkManager(unittest.TestCase):
         
         self.assertIsNone(result)
     
-    @patch('route_services.network_manager.load_or_generate_graph')
+    @patch('graph_cache.load_or_generate_graph')
     def test_network_caching(self, mock_load_graph):
         """Test that networks are cached properly"""
         mock_load_graph.return_value = self.mock_graph
@@ -135,7 +135,7 @@ class TestNetworkManager(unittest.TestCase):
         info = self.manager.get_node_info(self.mock_graph, 9999)
         self.assertEqual(info, {})
     
-    @patch('route_services.network_manager.haversine_distance')
+    @patch('route.haversine_distance')
     def test_get_nearby_nodes(self, mock_haversine):
         """Test nearby nodes search"""
         # Mock haversine distance to return predictable values
