@@ -28,6 +28,14 @@ class TestElevationProfiler(unittest.TestCase):
         self.mock_graph.add_node(1004, x=-80.4097, y=37.1302, elevation=650)  # +40m
         self.mock_graph.add_node(1005, x=-80.4098, y=37.1303, elevation=630)  # -20m
         
+        # Add edges between consecutive nodes for network routing
+        # Each edge has length=100 to match expected test distances
+        self.mock_graph.add_edge(1001, 1002, length=100)
+        self.mock_graph.add_edge(1002, 1003, length=100)
+        self.mock_graph.add_edge(1003, 1004, length=100)
+        self.mock_graph.add_edge(1004, 1005, length=100)
+        self.mock_graph.add_edge(1005, 1001, length=100)  # Return to start
+        
         self.profiler = ElevationProfiler(self.mock_graph)
         
         # Create sample route result
@@ -45,11 +53,9 @@ class TestElevationProfiler(unittest.TestCase):
         profiler = ElevationProfiler(self.mock_graph)
         self.assertEqual(profiler.graph, self.mock_graph)
     
-    @patch('route.haversine_distance')
-    def test_generate_profile_data_success(self, mock_haversine):
+    def test_generate_profile_data_success(self):
         """Test successful elevation profile generation"""
-        # Mock haversine distances
-        mock_haversine.return_value = 100  # constant distance
+        # Using network distances from graph edges (100m each)
         
         profile_data = self.profiler.generate_profile_data(self.sample_route_result)
         
@@ -257,6 +263,101 @@ class TestElevationProfiler(unittest.TestCase):
             
             # Distances should match elevations
             self.assertEqual(len(distances_km), len(elevations))
+    
+    def test_get_detailed_route_path_success(self):
+        """Test detailed route path generation with complete network"""
+        detailed_path = self.profiler.get_detailed_route_path(self.sample_route_result)
+        
+        # Should return path with all nodes
+        self.assertIsInstance(detailed_path, list)
+        self.assertGreater(len(detailed_path), 0)
+        
+        # First node should be start node
+        self.assertEqual(detailed_path[0]['node_id'], 1001)
+        self.assertEqual(detailed_path[0]['node_type'], 'intersection')
+        
+        # Should have required fields
+        for point in detailed_path:
+            self.assertIn('latitude', point)
+            self.assertIn('longitude', point)
+            self.assertIn('node_id', point)
+            self.assertIn('elevation', point)
+            self.assertIn('node_type', point)
+        
+        # Should end back at start (circular route)
+        self.assertEqual(detailed_path[-1]['node_id'], 1001)
+    
+    def test_get_detailed_route_path_empty_route(self):
+        """Test detailed path with empty route"""
+        empty_result = {}
+        detailed_path = self.profiler.get_detailed_route_path(empty_result)
+        self.assertEqual(detailed_path, [])
+        
+        empty_route_result = {'route': []}
+        detailed_path = self.profiler.get_detailed_route_path(empty_route_result)
+        self.assertEqual(detailed_path, [])
+    
+    def test_get_detailed_route_path_single_node(self):
+        """Test detailed path with single node route"""
+        single_node_result = {
+            'route': [1001],
+            'stats': {'total_distance_km': 0}
+        }
+        detailed_path = self.profiler.get_detailed_route_path(single_node_result)
+        
+        # Should have just the single node
+        self.assertEqual(len(detailed_path), 1)
+        self.assertEqual(detailed_path[0]['node_id'], 1001)
+    
+    def test_get_detailed_route_path_disconnected_nodes(self):
+        """Test detailed path with nodes that have no network connection"""
+        # Create a graph with disconnected nodes
+        disconnected_graph = nx.Graph()
+        disconnected_graph.add_node(2001, x=-80.4094, y=37.1299, elevation=600)
+        disconnected_graph.add_node(2002, x=-80.4095, y=37.1300, elevation=620)
+        # Note: no edges between nodes
+        
+        profiler = ElevationProfiler(disconnected_graph)
+        disconnected_result = {
+            'route': [2001, 2002],
+            'stats': {'total_distance_km': 1.0}
+        }
+        
+        detailed_path = profiler.get_detailed_route_path(disconnected_result)
+        
+        # Should still return both nodes (fallback behavior)
+        self.assertEqual(len(detailed_path), 3)  # start + end + return to start
+        self.assertEqual(detailed_path[0]['node_id'], 2001)
+        self.assertEqual(detailed_path[1]['node_id'], 2002)
+        self.assertEqual(detailed_path[2]['node_id'], 2001)
+    
+    def test_network_distance_cache(self):
+        """Test that network distance caching works correctly"""
+        # First call
+        distance1 = self.profiler._get_network_distance(1001, 1002)
+        self.assertEqual(distance1, 100)  # From our test graph setup
+        
+        # Second call should use cache
+        distance2 = self.profiler._get_network_distance(1001, 1002)
+        self.assertEqual(distance2, 100)
+        self.assertEqual(distance1, distance2)
+        
+        # Reverse direction should also work (symmetric)
+        distance3 = self.profiler._get_network_distance(1002, 1001)
+        self.assertEqual(distance3, 100)
+    
+    def test_network_distance_same_node(self):
+        """Test network distance between same node"""
+        distance = self.profiler._get_network_distance(1001, 1001)
+        self.assertEqual(distance, 0)
+    
+    def test_network_distance_no_path(self):
+        """Test network distance when no path exists"""
+        # Create isolated node
+        self.mock_graph.add_node(9999, x=-80.5, y=37.2, elevation=700)
+        
+        distance = self.profiler._get_network_distance(1001, 9999)
+        self.assertEqual(distance, float('inf'))
 
 
 if __name__ == '__main__':

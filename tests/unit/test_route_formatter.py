@@ -314,6 +314,141 @@ class TestRouteFormatter(unittest.TestCase):
         
         timestamp = self.formatter._get_timestamp()
         self.assertEqual(timestamp, '2023-12-01T12:00:00')
+    
+    def test_export_route_geojson_success(self):
+        """Test successful GeoJSON export"""
+        # Create sample detailed path
+        detailed_path = [
+            {'latitude': 37.1299, 'longitude': -80.4094, 'node_id': 1001, 'elevation': 600, 'node_type': 'intersection'},
+            {'latitude': 37.1300, 'longitude': -80.4095, 'node_id': 1002, 'elevation': 620, 'node_type': 'intersection'},
+            {'latitude': 37.1301, 'longitude': -80.4096, 'node_id': 1003, 'elevation': 610, 'node_type': 'geometry'},
+            {'latitude': 37.1299, 'longitude': -80.4094, 'node_id': 1001, 'elevation': 600, 'node_type': 'intersection'}
+        ]
+        
+        geojson_str = self.formatter.export_route_geojson(self.sample_route_result, detailed_path)
+        
+        # Parse JSON to verify structure
+        import json
+        geojson = json.loads(geojson_str)
+        
+        # Check GeoJSON structure
+        self.assertEqual(geojson['type'], 'FeatureCollection')
+        self.assertIn('features', geojson)
+        self.assertEqual(len(geojson['features']), 1)
+        
+        feature = geojson['features'][0]
+        self.assertEqual(feature['type'], 'Feature')
+        self.assertIn('properties', feature)
+        self.assertIn('geometry', feature)
+        
+        # Check geometry
+        geometry = feature['geometry']
+        self.assertEqual(geometry['type'], 'LineString')
+        self.assertIn('coordinates', geometry)
+        self.assertEqual(len(geometry['coordinates']), 4)
+        
+        # Check coordinates format [longitude, latitude]
+        coord = geometry['coordinates'][0]
+        self.assertEqual(coord[0], -80.4094)  # longitude
+        self.assertEqual(coord[1], 37.1299)   # latitude
+        
+        # Check properties
+        props = feature['properties']
+        self.assertEqual(props['name'], 'Running Route')
+        self.assertEqual(props['distance_km'], 2.5)
+        self.assertEqual(props['total_nodes'], 4)
+        self.assertEqual(props['intersection_count'], 3)
+        self.assertEqual(props['geometry_nodes'], 1)
+    
+    def test_export_route_geojson_empty_path(self):
+        """Test GeoJSON export with empty path"""
+        geojson_str = self.formatter.export_route_geojson(self.sample_route_result, [])
+        
+        import json
+        geojson = json.loads(geojson_str)
+        
+        self.assertEqual(geojson['type'], 'FeatureCollection')
+        self.assertEqual(geojson['features'], [])
+    
+    def test_export_route_geojson_no_route_result(self):
+        """Test GeoJSON export with no route result"""
+        detailed_path = [
+            {'latitude': 37.1299, 'longitude': -80.4094, 'node_id': 1001, 'elevation': 600, 'node_type': 'intersection'}
+        ]
+        
+        geojson_str = self.formatter.export_route_geojson(None, detailed_path)
+        
+        import json
+        geojson = json.loads(geojson_str)
+        
+        # Should still create valid GeoJSON but with default values
+        self.assertEqual(geojson['type'], 'FeatureCollection')
+        feature = geojson['features'][0]
+        props = feature['properties']
+        self.assertEqual(props['distance_km'], 0)
+        self.assertEqual(props['elevation_gain_m'], 0)
+    
+    @patch('datetime.datetime')
+    def test_export_route_gpx_success(self, mock_datetime):
+        """Test successful GPX export"""
+        mock_datetime.now.return_value.isoformat.return_value = '2023-12-01T12:00:00'
+        
+        # Create sample detailed path
+        detailed_path = [
+            {'latitude': 37.1299, 'longitude': -80.4094, 'node_id': 1001, 'elevation': 600, 'node_type': 'intersection'},
+            {'latitude': 37.1300, 'longitude': -80.4095, 'node_id': 1002, 'elevation': 620, 'node_type': 'intersection'},
+            {'latitude': 37.1301, 'longitude': -80.4096, 'node_id': 1003, 'elevation': 610, 'node_type': 'geometry'}
+        ]
+        
+        gpx_str = self.formatter.export_route_gpx(self.sample_route_result, detailed_path)
+        
+        # Check GPX structure
+        self.assertIn('<?xml version="1.0" encoding="UTF-8"?>', gpx_str)
+        self.assertIn('<gpx version="1.1"', gpx_str)
+        self.assertIn('creator="RunningRouteOptimizer"', gpx_str)
+        self.assertIn('<name>Running Route</name>', gpx_str)
+        self.assertIn('<time>2023-12-01T12:00:00</time>', gpx_str)
+        self.assertIn('2.50km, 120m elevation gain', gpx_str)
+        self.assertIn('<type>running</type>', gpx_str)
+        
+        # Check track points (note: coordinate precision may vary)
+        self.assertIn('<trkpt lat="37.1299" lon="-80.4094">', gpx_str)
+        self.assertIn('<ele>600</ele>', gpx_str)
+        self.assertIn('<trkpt lat="37.13" lon="-80.4095">', gpx_str)  # precision varies
+        self.assertIn('<ele>620</ele>', gpx_str)
+        self.assertIn('<trkpt lat="37.1301" lon="-80.4096">', gpx_str)
+        self.assertIn('<ele>610</ele>', gpx_str)
+        
+        # Check structure
+        self.assertIn('<trk>', gpx_str)
+        self.assertIn('<trkseg>', gpx_str)
+        self.assertIn('</trkseg>', gpx_str)
+        self.assertIn('</trk>', gpx_str)
+        self.assertIn('</gpx>', gpx_str)
+    
+    def test_export_route_gpx_empty_path(self):
+        """Test GPX export with empty path"""
+        gpx_str = self.formatter.export_route_gpx(self.sample_route_result, [])
+        
+        self.assertIn('<?xml version="1.0" encoding="UTF-8"?>', gpx_str)
+        self.assertIn('<gpx version="1.1"', gpx_str)
+        self.assertIn('</gpx>', gpx_str)
+        # Should be minimal GPX with no track points
+    
+    @patch('datetime.datetime')
+    def test_export_route_gpx_no_route_result(self, mock_datetime):
+        """Test GPX export with no route result"""
+        mock_datetime.now.return_value.isoformat.return_value = '2023-12-01T12:00:00'
+        
+        detailed_path = [
+            {'latitude': 37.1299, 'longitude': -80.4094, 'node_id': 1001, 'elevation': 600, 'node_type': 'intersection'}
+        ]
+        
+        gpx_str = self.formatter.export_route_gpx(None, detailed_path)
+        
+        # Should still create valid GPX with default values
+        self.assertIn('0.00km, 0m elevation gain', gpx_str)
+        self.assertIn('<trkpt lat="37.1299" lon="-80.4094">', gpx_str)
 
 
 if __name__ == '__main__':
