@@ -1,117 +1,144 @@
 #!/usr/bin/env python3
 """
-Command Line Route Planner
-Interactive CLI for generating optimized running routes
+Refactored Command Line Route Planner
+Uses shared route services for consistent functionality
 """
 
 import argparse
 import sys
 import time
 from typing import List, Tuple
-import osmnx as ox
-import numpy as np
-import matplotlib.pyplot as plt
-from route import add_elevation_to_graph, add_elevation_to_edges, add_running_weights, haversine_distance
-from tsp_solver import RouteObjective
-try:
-    from tsp_solver_fast import FastRunningRouteOptimizer as RunningRouteOptimizer
-    print("✅ Using fast TSP solver (no distance matrix precomputation)")
-except ImportError:
-    from tsp_solver import RunningRouteOptimizer
-    print("⚠️ Using standard TSP solver (with distance matrix)")
 
-class CLIRoutePlanner:
-    """Command line interface for route planning"""
+from route_services import (
+    NetworkManager, RouteOptimizer, RouteAnalyzer, 
+    ElevationProfiler, RouteFormatter
+)
+
+
+class RefactoredCLIRoutePlanner:
+    """Refactored command line interface using shared route services"""
     
     def __init__(self):
-        self.graph = None
-        self.center_point = (37.1299, -80.4094)  # Christiansburg, VA
-        self.selected_start_node = None  # Store selected starting point
+        """Initialize the CLI route planner"""
+        self.services = None
+        self.selected_start_node = 1529188403  # Default starting point
         
-    def load_network(self, radius_km=0.8):
-        """Load street network with elevation data (cached)"""
-        print("🌐 Loading street network and elevation data...")
-        print(f"   Area: {radius_km:.1f}km radius around Christiansburg, VA")
+    def initialize_services(self, center_point=None, radius_km=0.8):
+        """Initialize all route services
         
+        Args:
+            center_point: (lat, lon) tuple for network center
+            radius_km: Network radius in kilometers
+            
+        Returns:
+            True if services initialized successfully
+        """
         try:
-            # Use cached graph loader
-            from graph_cache import load_or_generate_graph
+            print("🌐 Initializing route planning services...")
             
-            self.graph = load_or_generate_graph(
-                center_point=self.center_point,
-                radius_m=int(radius_km * 1000),
-                network_type='all'
-            )
+            # Create network manager and load graph
+            network_manager = NetworkManager(center_point)
+            graph = network_manager.load_network(radius_km)
             
-            if self.graph:
-                print(f"✅ Loaded {len(self.graph.nodes)} intersections and {len(self.graph.edges)} road segments")
-                return True
-            else:
-                print("❌ Failed to load network")
+            if not graph:
+                print("❌ Failed to load street network")
                 return False
             
+            # Create all services
+            self.services = {
+                'network_manager': network_manager,
+                'route_optimizer': RouteOptimizer(graph),
+                'route_analyzer': RouteAnalyzer(graph),
+                'elevation_profiler': ElevationProfiler(graph),
+                'route_formatter': RouteFormatter(),
+                'graph': graph
+            }
+            
+            # Display network stats
+            stats = network_manager.get_network_stats(graph)
+            print(f"✅ Loaded {stats['nodes']} intersections and {stats['edges']} road segments")
+            
+            # Validate default starting node
+            if not network_manager.validate_node_exists(graph, self.selected_start_node):
+                print(f"⚠️ Default starting node {self.selected_start_node} not found, will need to select one")
+                self.selected_start_node = None
+            
+            return True
+            
         except Exception as e:
-            print(f"❌ Failed to load network: {e}")
+            print(f"❌ Failed to initialize services: {e}")
             return False
     
     def list_starting_points(self, num_points=10):
-        """List potential starting points with elevations"""
-        if not self.graph:
-            print("❌ Network not loaded")
+        """List potential starting points
+        
+        Args:
+            num_points: Number of points to display
+            
+        Returns:
+            List of node IDs
+        """
+        if not self.services:
+            print("❌ Services not initialized")
             return []
         
-        print(f"\n📍 Available Starting Points (showing {num_points}):")
+        network_manager = self.services['network_manager']
+        graph = self.services['graph']
+        center_point = network_manager.center_point
+        
+        # Get nearby nodes around center point
+        nearby_nodes = network_manager.get_nearby_nodes(
+            graph, center_point[0], center_point[1], 
+            radius_km=0.5, max_nodes=num_points
+        )
+        
+        print(f"\\n📍 Available Starting Points (showing {len(nearby_nodes)}):")
         print("-" * 70)
-        print(f"{'Node ID':<12} {'Latitude':<12} {'Longitude':<12} {'Elevation':<10}")
+        print(f"{'#':<3} {'Node ID':<12} {'Latitude':<12} {'Longitude':<12} {'Elevation':<10}")
         print("-" * 70)
         
-        # Get a sample of nodes with good connectivity
-        good_nodes = []
-        for node_id, data in self.graph.nodes(data=True):
-            degree = self.graph.degree(node_id)
-            if degree >= 2:  # At least 2 connections
-                good_nodes.append((node_id, data))
-        
-        # Sort by proximity to center and take first num_points
-        good_nodes.sort(key=lambda x: haversine_distance(
-            self.center_point[0], self.center_point[1],
-            x[1]['y'], x[1]['x']
-        ))
-        
-        selected_nodes = []
-        for i, (node_id, data) in enumerate(good_nodes[:num_points]):
+        node_list = []
+        for i, (node_id, distance, data) in enumerate(nearby_nodes):
             lat, lon = data['y'], data['x']
             elevation = data.get('elevation', 0)
             
             print(f"{i+1:>2}. {node_id:<12} {lat:<12.6f} {lon:<12.6f} {elevation:<10.0f}")
-            selected_nodes.append(node_id)
+            node_list.append(node_id)
         
         print("-" * 70)
-        print("💡 Tip: You can enter the node ID directly, or use option numbers (1-10)")
-        return selected_nodes
+        print("💡 Tip: You can enter the option number (1-10) or the full node ID")
+        
+        return node_list
     
     def select_starting_point(self, num_points=10):
-        """Interactive starting point selection"""
-        if not self.graph:
-            print("❌ Network not loaded")
+        """Interactive starting point selection
+        
+        Args:
+            num_points: Number of points to display
+            
+        Returns:
+            Selected node ID or None
+        """
+        if not self.services:
+            print("❌ Services not initialized")
             return None
         
-        # Display available starting points
         available_nodes = self.list_starting_points(num_points)
+        network_manager = self.services['network_manager']
+        graph = self.services['graph']
         
         while True:
             try:
-                start_node_input = input(f"\nSelect starting point (1-{len(available_nodes)} or node ID, or 'back' to return): ").strip().lower()
+                user_input = input(f"\\nSelect starting point (1-{len(available_nodes)} or node ID, 'back' to return): ").strip()
                 
-                if start_node_input == 'back' or start_node_input == '':
+                if user_input.lower() in ['back', '']:
                     return None
                 
                 # Try to parse as integer
                 try:
-                    input_num = int(start_node_input)
+                    input_num = int(user_input)
                 except ValueError:
-                    print(f"❌ Invalid input: '{start_node_input}' is not a valid integer")
-                    print("   Please enter a number, node ID, or 'back'")
+                    print(f"❌ Invalid input: '{user_input}' is not a valid integer")
                     continue
                 
                 # Check if it's an option number
@@ -124,433 +151,295 @@ class CLIRoutePlanner:
                     print(f"✅ Selected node ID: {selected_node}")
                 
                 # Validate the node exists
-                if selected_node not in self.graph.nodes:
+                if not network_manager.validate_node_exists(graph, selected_node):
                     print(f"❌ Invalid node ID: {selected_node}")
-                    print(f"   Graph has {len(self.graph.nodes)} nodes")
                     continue
                 
-                # Store the selection and show details
+                # Store selection and show details
                 self.selected_start_node = selected_node
-                node_data = self.graph.nodes[selected_node]
+                node_info = network_manager.get_node_info(graph, selected_node)
                 print(f"📍 Starting point confirmed:")
-                print(f"   Node ID: {selected_node}")
-                print(f"   Location: {node_data['y']:.6f}, {node_data['x']:.6f}")
-                print(f"   Elevation: {node_data.get('elevation', 0):.0f}m")
+                print(f"   Node ID: {node_info['node_id']}")
+                print(f"   Location: {node_info['latitude']:.6f}, {node_info['longitude']:.6f}")
+                print(f"   Elevation: {node_info['elevation']:.0f}m")
                 
                 return selected_node
                 
             except KeyboardInterrupt:
-                print("\n⏹️ Selection cancelled")
+                print("\\n⏹️ Selection cancelled")
                 return None
     
-    def find_start_by_location(self, lat=None, lon=None):
-        """Find starting point near given coordinates"""
-        if not self.graph:
-            print("❌ Network not loaded")
+    def generate_route(self, start_node, target_distance, objective=None, algorithm="nearest_neighbor"):
+        """Generate optimized route using route services
+        
+        Args:
+            start_node: Starting node ID
+            target_distance: Target distance in km
+            objective: Route objective
+            algorithm: Algorithm to use
+            
+        Returns:
+            Route result dictionary or None
+        """
+        if not self.services:
+            print("❌ Services not initialized")
             return None
         
-        if lat is None or lon is None:
-            # Use center point
-            lat, lon = self.center_point
-            print(f"Using center point: {lat:.6f}, {lon:.6f}")
+        route_optimizer = self.services['route_optimizer']
         
-        # Find nearest node
-        nearest_node = None
-        min_distance = float('inf')
+        # Use default objective if not provided
+        if objective is None:
+            objective = route_optimizer.RouteObjective.MINIMIZE_DISTANCE
         
-        for node_id, data in self.graph.nodes(data=True):
-            distance = haversine_distance(lat, lon, data['y'], data['x'])
-            if distance < min_distance:
-                min_distance = distance
-                nearest_node = node_id
-        
-        if nearest_node:
-            node_data = self.graph.nodes[nearest_node]
-            print(f"📍 Found nearest intersection:")
-            print(f"   Node ID: {nearest_node}")
-            print(f"   Location: {node_data['y']:.6f}, {node_data['x']:.6f}")
-            print(f"   Elevation: {node_data.get('elevation', 0):.0f}m")
-            print(f"   Distance from target: {min_distance:.0f}m")
-            
-            # Ask if user wants to use this as starting point
-            use_point = input("\nUse this as starting point? (y/n): ").strip().lower()
-            if use_point in ['y', 'yes']:
-                self.selected_start_node = nearest_node
-                print(f"✅ Starting point set to Node {nearest_node}")
-            
-        return nearest_node
-    
-    def generate_route(self, start_node, target_distance, objective, algorithm="nearest_neighbor"):
-        """Generate optimized route"""
-        if not self.graph:
-            print("❌ Network not loaded")
-            return None
-        
-        print(f"\n🚀 Generating optimized route...")
+        print(f"\\n🚀 Generating optimized route...")
         print(f"   Start: Node {start_node}")
         print(f"   Target distance: {target_distance:.1f}km")
-        print(f"   Objective: {objective}")
         print(f"   Algorithm: {algorithm}")
+        print(f"   Solver: {route_optimizer.solver_type}")
+        
+        # Generate route
+        result = route_optimizer.optimize_route(
+            start_node=start_node,
+            target_distance_km=target_distance,
+            objective=objective,
+            algorithm=algorithm
+        )
+        
+        if result:
+            solve_time = result.get('solver_info', {}).get('solve_time', 0)
+            print(f"✅ Route generated in {solve_time:.2f} seconds")
+        
+        return result
+    
+    def display_route_stats(self, route_result):
+        """Display route statistics using formatter
+        
+        Args:
+            route_result: Route result from optimizer
+        """
+        if not self.services or not route_result:
+            return
+        
+        route_analyzer = self.services['route_analyzer']
+        route_formatter = self.services['route_formatter']
+        
+        # Analyze route for difficulty rating
+        analysis = route_analyzer.analyze_route(route_result)
+        difficulty = route_analyzer.get_route_difficulty_rating(route_result)
+        analysis['difficulty'] = difficulty
+        
+        # Format and display stats
+        stats_output = route_formatter.format_route_stats_cli(route_result, analysis)
+        print(stats_output)
+    
+    def generate_directions(self, route_result):
+        """Generate and display turn-by-turn directions
+        
+        Args:
+            route_result: Route result from optimizer
+        """
+        if not self.services or not route_result:
+            return
+        
+        route_analyzer = self.services['route_analyzer']
+        route_formatter = self.services['route_formatter']
+        
+        # Generate directions
+        directions = route_analyzer.generate_directions(route_result)
+        
+        # Format and display
+        directions_output = route_formatter.format_directions_cli(directions)
+        print(directions_output)
+    
+    def create_route_visualization(self, route_result, save_file=None):
+        """Create route visualization
+        
+        Args:
+            route_result: Route result from optimizer
+            save_file: Optional file to save visualization
+        """
+        if not self.services or not route_result:
+            return
+        
+        elevation_profiler = self.services['elevation_profiler']
+        
+        print(f"\\n📈 Creating route visualization...")
         
         try:
-            optimizer = RunningRouteOptimizer(self.graph)
+            # Generate elevation profile data
+            profile_data = elevation_profiler.generate_profile_data(route_result)
             
-            start_time = time.time()
-            result = optimizer.find_optimal_route(
-                start_node=start_node,
-                target_distance_km=target_distance,
-                objective=objective,
-                algorithm=algorithm
-            )
-            solve_time = time.time() - start_time
+            if not profile_data:
+                print("❌ No profile data available")
+                return
             
-            print(f"✅ Route generated in {solve_time:.2f} seconds")
-            return result
+            print(f"   Route has {len(route_result['route'])} nodes")
+            print(f"   Total distance: {profile_data.get('total_distance_km', 0):.2f}km")
             
+            # Create matplotlib visualization (simplified version)
+            try:
+                import matplotlib.pyplot as plt
+                
+                elevations = profile_data['elevations']
+                distances_km = profile_data['distances_km']
+                coordinates = profile_data['coordinates']
+                
+                # Create figure with elevation profile
+                fig, ax = plt.subplots(1, 1, figsize=(12, 6))
+                
+                # Elevation profile
+                ax.plot(distances_km, elevations, 'g-', linewidth=2, marker='o', markersize=4)
+                ax.fill_between(distances_km, elevations, alpha=0.3, color='green')
+                ax.set_xlabel('Distance (km)')
+                ax.set_ylabel('Elevation (m)')
+                ax.set_title(f'Elevation Profile - {profile_data.get("total_distance_km", 0):.2f}km Route')
+                ax.grid(True, alpha=0.3)
+                
+                plt.tight_layout()
+                
+                if save_file:
+                    plt.savefig(save_file, dpi=150, bbox_inches='tight')
+                    print(f"   ✅ Saved visualization to: {save_file}")
+                
+                plt.show()
+                
+            except ImportError:
+                print("⚠️ Matplotlib not available, cannot create visualization")
+            except Exception as viz_error:
+                print(f"❌ Visualization failed: {viz_error}")
+                
         except Exception as e:
-            print(f"❌ Route generation failed: {e}")
-            return None
-    
-    def display_route_stats(self, result):
-        """Display detailed route statistics"""
-        if not result:
-            return
-        
-        stats = result['stats']
-        route = result['route']
-        
-        print(f"\n📊 Route Statistics:")
-        print("=" * 50)
-        print(f"Distance:        {stats.get('total_distance_km', 0):.2f} km")
-        print(f"Elevation Gain:  {stats.get('total_elevation_gain_m', 0):.0f} m")
-        print(f"Elevation Loss:  {stats.get('total_elevation_loss_m', 0):.0f} m")
-        print(f"Net Elevation:   {stats.get('net_elevation_gain_m', 0):+.0f} m")
-        print(f"Max Grade:       {stats.get('max_grade_percent', 0):.1f}%")
-        print(f"Est. Time:       {stats.get('estimated_time_min', 0):.0f} minutes")
-        print(f"Route Points:    {len(route)} intersections")
-        print(f"Algorithm:       {result.get('algorithm', 'Unknown')}")
-        print(f"Objective:       {result.get('objective', 'Unknown')}")
-        print("=" * 50)
-    
-    def generate_directions(self, result):
-        """Generate and display turn-by-turn directions"""
-        if not result or not result.get('route'):
-            return
-        
-        route = result['route']
-        
-        print(f"\n📋 Turn-by-Turn Directions:")
-        print("=" * 60)
-        
-        cumulative_distance = 0
-        
-        # Start
-        if route and route[0] in self.graph.nodes:
-            start_data = self.graph.nodes[route[0]]
-            print(f"1. Start at intersection (Node {route[0]})")
-            print(f"   Elevation: {start_data.get('elevation', 0):.0f}m")
-            print(f"   Distance: 0.0 km")
-            print()
-        
-        # Route segments
-        for i in range(1, len(route)):
-            if route[i] in self.graph.nodes and route[i-1] in self.graph.nodes:
-                curr_data = self.graph.nodes[route[i]]
-                prev_data = self.graph.nodes[route[i-1]]
-                
-                # Calculate segment distance
-                segment_dist = haversine_distance(
-                    prev_data['y'], prev_data['x'],
-                    curr_data['y'], curr_data['x']
-                )
-                cumulative_distance += segment_dist
-                
-                # Elevation change
-                elevation_change = curr_data.get('elevation', 0) - prev_data.get('elevation', 0)
-                if elevation_change > 5:
-                    terrain = "⬆️ uphill"
-                elif elevation_change < -5:
-                    terrain = "⬇️ downhill"
-                else:
-                    terrain = "➡️ level"
-                
-                print(f"{i+1}. Continue to intersection (Node {route[i]}) - {terrain}")
-                print(f"   Elevation: {curr_data.get('elevation', 0):.0f}m ({elevation_change:+.0f}m)")
-                print(f"   Distance: {cumulative_distance/1000:.2f} km")
-                print()
-        
-        # Return to start
-        if len(route) > 1:
-            print(f"{len(route)+1}. Return to starting point to complete the loop")
-            print(f"   Total distance: {result['stats'].get('total_distance_km', 0):.2f} km")
-        
-        print("=" * 60)
-    
-    def create_route_visualization(self, result, save_file=None):
-        """Create route visualization"""
-        if not result or not result.get('route'):
-            return
-        
-        route = result['route']
-        
-        print(f"\n📈 Creating route visualization...")
-        print(f"   Route has {len(route)} nodes")
-        
-        # Get route coordinates and elevations
-        lats, lons, elevations = [], [], []
-        distances = [0]
-        cumulative_distance = 0
-        
-        for i, node in enumerate(route):
-            if node in self.graph.nodes:
-                data = self.graph.nodes[node]
-                lats.append(data['y'])
-                lons.append(data['x'])
-                elevations.append(data.get('elevation', 0))
-                
-                if i > 0:
-                    prev_data = self.graph.nodes[route[i-1]]
-                    segment_dist = haversine_distance(
-                        prev_data['y'], prev_data['x'],
-                        data['y'], data['x']
-                    )
-                    cumulative_distance += segment_dist
-                    distances.append(cumulative_distance)
-        
-        # Add return to start for distance calculation only
-        if len(route) > 1:
-            start_data = self.graph.nodes[route[0]]
-            end_data = self.graph.nodes[route[-1]]
-            return_dist = haversine_distance(
-                end_data['y'], end_data['x'],
-                start_data['y'], start_data['x']
-            )
-            cumulative_distance += return_dist
-            distances.append(cumulative_distance)
-            # Don't append elevation here - it will create array length mismatch
-        
-        # Debug array lengths
-        print(f"   Coordinates: {len(lats)} lats, {len(lons)} lons, {len(elevations)} elevations")
-        print(f"   Distances: {len(distances)} points")
-        
-        # Create visualization
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 10))
-        
-        # Map view - ensure all arrays have same length
-        if len(lons) == len(lats) == len(elevations):
-            ax1.scatter(lons, lats, c=elevations, cmap='terrain', s=50, alpha=0.8)
-            print("   ✅ Using elevation coloring for route points")
-        else:
-            # Fallback without elevation coloring if arrays don't match
-            ax1.scatter(lons, lats, c='blue', s=50, alpha=0.8)
-            print(f"   ⚠️ Array mismatch - using fallback coloring")
-        ax1.plot(lons + [lons[0]], lats + [lats[0]], 'r-', linewidth=2, alpha=0.7)
-        ax1.scatter([lons[0]], [lats[0]], c='green', s=100, marker='*', label='Start/Finish')
-        ax1.set_xlabel('Longitude')
-        ax1.set_ylabel('Latitude')
-        ax1.set_title('Route Map with Elevation')
-        ax1.legend()
-        ax1.grid(True, alpha=0.3)
-        
-        # Elevation profile - handle array length mismatch
-        distances_km = [d / 1000 for d in distances]
-        
-        # Add start elevation again for the return segment to close the loop
-        elevations_with_return = elevations + [elevations[0]] if elevations else []
-        
-        # Ensure distances and elevations have same length
-        print(f"   Elevation profile: {len(distances_km)} distances, {len(elevations_with_return)} elevations")
-        
-        if len(distances_km) == len(elevations_with_return):
-            ax2.plot(distances_km, elevations_with_return, 'g-', linewidth=2, marker='o')
-            ax2.fill_between(distances_km, elevations_with_return, alpha=0.3, color='green')
-            ax2.set_xlabel('Distance (km)')
-            print("   ✅ Using distance-based elevation profile")
-        else:
-            # Fallback: just plot elevations vs route points
-            route_points = list(range(len(elevations)))
-            ax2.plot(route_points, elevations, 'g-', linewidth=2, marker='o')
-            ax2.fill_between(route_points, elevations, alpha=0.3, color='green')
-            ax2.set_xlabel('Route Point')
-            print("   ⚠️ Using fallback route-point-based profile")
-        
-        ax2.set_ylabel('Elevation (m)')
-        ax2.set_title('Elevation Profile')
-        ax2.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        
-        if save_file:
-            plt.savefig(save_file, dpi=150, bbox_inches='tight')
-            print(f"   Saved visualization to: {save_file}")
-        
-        plt.show()
+            print(f"❌ Profile generation failed: {e}")
+
 
 def interactive_mode():
-    """Interactive CLI mode"""
-    planner = CLIRoutePlanner()
+    """Interactive CLI mode using refactored services"""
+    planner = RefactoredCLIRoutePlanner()
     
-    print("🏃 Welcome to the Running Route Optimizer CLI!")
-    print("=" * 50)
+    print("🏃 Welcome to the Refactored Running Route Optimizer CLI!")
+    print("=" * 55)
+    print("✨ Powered by shared route services")
     
-    # Load network
-    if not planner.load_network():
+    # Initialize services
+    if not planner.initialize_services():
         return
+    
+    route_optimizer = planner.services['route_optimizer']
     
     while True:
         # Show current starting point if selected
         if planner.selected_start_node:
-            node_data = planner.graph.nodes[planner.selected_start_node]
-            print(f"\n📍 Current starting point: Node {planner.selected_start_node}")
-            print(f"   Location: {node_data['y']:.6f}, {node_data['x']:.6f}")
-            print(f"   Elevation: {node_data.get('elevation', 0):.0f}m")
+            network_manager = planner.services['network_manager']
+            graph = planner.services['graph']
+            
+            if network_manager.validate_node_exists(graph, planner.selected_start_node):
+                node_info = network_manager.get_node_info(graph, planner.selected_start_node)
+                print(f"\\n📍 Current starting point: Node {node_info['node_id']}")
+                print(f"   Location: {node_info['latitude']:.6f}, {node_info['longitude']:.6f}")
+                print(f"   Elevation: {node_info['elevation']:.0f}m")
         
-        print(f"\n📋 Main Menu:")
+        print(f"\\n📋 Main Menu:")
         print("1. Select starting point")
-        print("2. Find starting point by location")
-        print("3. Generate route" + (" (with selected point)" if planner.selected_start_node else " (manual entry)"))
+        print("2. Generate route" + (" (with selected point)" if planner.selected_start_node else " (manual entry)"))
+        print("3. Show solver information")
         print("4. Quit")
         
         try:
-            choice = input("\nSelect option (1-4): ").strip()
+            choice = input("\\nSelect option (1-4): ").strip()
             
             if choice == '1':
                 planner.select_starting_point()
                 
             elif choice == '2':
+                # Route generation
                 try:
-                    lat = float(input("Enter latitude (or press Enter for center): ").strip() or planner.center_point[0])
-                    lon = float(input("Enter longitude (or press Enter for center): ").strip() or planner.center_point[1])
-                    planner.find_start_by_location(lat, lon)
-                except ValueError:
-                    print("❌ Invalid coordinates")
-                
-            elif choice == '3':
-                # Get route parameters
-                try:
-                    # Use pre-selected starting point if available
+                    # Use pre-selected starting point or manual entry
                     if planner.selected_start_node:
                         start_node = planner.selected_start_node
                         print(f"✅ Using selected starting point: Node {start_node}")
                     else:
-                        # Manual starting point selection
-                        print("\n📍 Available starting points:")
                         available_nodes = planner.list_starting_points(10)
+                        start_input = input("\\nEnter starting node (option number or node ID): ").strip()
                         
-                        start_node_input = input("\nEnter starting node ID (or option number 1-10): ").strip()
-                        
-                        # Validate input is not empty
-                        if not start_node_input:
-                            print("❌ Empty input, please enter a node ID or option number")
-                            continue
-                        
-                        # Try to parse as integer
                         try:
-                            input_num = int(start_node_input)
+                            input_num = int(start_input)
+                            if 1 <= input_num <= len(available_nodes):
+                                start_node = available_nodes[input_num - 1]
+                            else:
+                                start_node = input_num
                         except ValueError:
-                            print(f"❌ Invalid input: '{start_node_input}' is not a valid integer")
-                            print("   Please enter a numeric node ID or option number (1-10)")
+                            print("❌ Invalid input")
                             continue
                         
-                        # Check if it's an option number (1-10)
-                        if 1 <= input_num <= len(available_nodes):
-                            start_node = available_nodes[input_num - 1]  # Convert to 0-based index
-                            print(f"✅ Selected option {input_num}: Node {start_node}")
-                        else:
-                            # Treat as direct node ID
-                            start_node = input_num
-                        
-                        # Validate the final node ID
-                        if start_node not in planner.graph.nodes:
-                            print(f"❌ Invalid node ID: {start_node}")
-                            print(f"   Input received: '{start_node_input}'")
-                            print(f"   Interpreted as: {start_node} (type: {type(start_node).__name__})")
-                            print(f"   Graph has {len(planner.graph.nodes)} nodes")
-                            
-                            # Show some nearby valid nodes
-                            sample_nodes = list(planner.graph.nodes)[:5]
-                            print(f"   Example valid nodes: {sample_nodes}")
-                            
-                            # Check if it's close to any valid nodes
-                            similar_nodes = [n for n in planner.graph.nodes if abs(n - start_node) < 10]
-                            if similar_nodes:
-                                print(f"   Similar nodes found: {similar_nodes[:3]}")
-                            
+                        # Validate node
+                        network_manager = planner.services['network_manager']
+                        if not network_manager.validate_node_exists(planner.services['graph'], start_node):
+                            print(f"❌ Invalid node: {start_node}")
                             continue
                     
-                    distance_input = input("Enter target distance (km): ").strip()
+                    # Get target distance
+                    distance_input = input("Enter target distance (km) [5.0]: ").strip()
                     try:
-                        target_distance = float(distance_input)
+                        target_distance = float(distance_input) if distance_input else 5.0
                         if target_distance <= 0:
                             print("❌ Distance must be positive")
                             continue
                     except ValueError:
-                        print(f"❌ Invalid distance: '{distance_input}' is not a valid number")
+                        print(f"❌ Invalid distance: '{distance_input}'")
                         continue
                     
-                    print("\nObjective options:")
-                    objectives = {
-                        '1': RouteObjective.MINIMIZE_DISTANCE,
-                        '2': RouteObjective.MAXIMIZE_ELEVATION,
-                        '3': RouteObjective.BALANCED_ROUTE,
-                        '4': RouteObjective.MINIMIZE_DIFFICULTY
-                    }
+                    # Get route objective
+                    print("\\nObjective options:")
+                    objectives = route_optimizer.get_available_objectives()
+                    obj_list = list(objectives.items())
                     
-                    print("1. Shortest route")
-                    print("2. Maximum elevation gain")
-                    print("3. Balanced route")
-                    print("4. Easiest route")
+                    for i, (name, _) in enumerate(obj_list, 1):
+                        print(f"{i}. {name}")
                     
-                    obj_choice = input("Select objective (1-4): ").strip()
-                    if obj_choice not in objectives:
-                        print("❌ Invalid objective")
-                        continue
+                    obj_input = input("Select objective (1-4) [1]: ").strip()
+                    try:
+                        obj_choice = int(obj_input) if obj_input else 1
+                        if 1 <= obj_choice <= len(obj_list):
+                            objective = obj_list[obj_choice - 1][1]
+                        else:
+                            objective = obj_list[0][1]  # Default
+                    except ValueError:
+                        objective = obj_list[0][1]  # Default
                     
-                    algorithm_input = input("Algorithm (nearest_neighbor/genetic) [nearest_neighbor]: ").strip() or "nearest_neighbor"
-                    if algorithm_input not in ["nearest_neighbor", "genetic"]:
-                        print(f"❌ Invalid algorithm: '{algorithm_input}'. Using nearest_neighbor.")
-                        algorithm = "nearest_neighbor"
-                    else:
-                        algorithm = algorithm_input
+                    # Get algorithm
+                    algorithms = route_optimizer.get_available_algorithms()
+                    algorithm_input = input(f"Algorithm ({'/'.join(algorithms)}) [nearest_neighbor]: ").strip()
+                    algorithm = algorithm_input if algorithm_input in algorithms else "nearest_neighbor"
                     
                     # Generate route
-                    result = planner.generate_route(
-                        start_node, target_distance, 
-                        objectives[obj_choice], algorithm
-                    )
+                    result = planner.generate_route(start_node, target_distance, objective, algorithm)
                     
                     if result:
                         planner.display_route_stats(result)
                         
                         # Ask for directions
-                        try:
-                            directions_input = input("\nShow turn-by-turn directions? (y/n): ").strip().lower()
-                            if directions_input in ['y', 'yes']:
-                                planner.generate_directions(result)
-                        except (ValueError, EOFError, KeyboardInterrupt):
-                            print("\n⏹️ Skipping directions")
+                        directions_input = input("\\nShow turn-by-turn directions? (y/n): ").strip().lower()
+                        if directions_input in ['y', 'yes']:
+                            planner.generate_directions(result)
                         
                         # Ask for visualization
-                        try:
-                            viz_input = input("\nCreate route visualization? (y/n): ").strip().lower()
-                            if viz_input in ['y', 'yes']:
-                                save_file = f"route_{start_node}_{target_distance}km.png"
-                                try:
-                                    planner.create_route_visualization(result, save_file)
-                                except Exception as viz_error:
-                                    print(f"❌ Visualization failed: {viz_error}")
-                                    print("   This might be due to missing matplotlib or display issues")
-                            elif viz_input in ['n', 'no']:
-                                print("⏹️ Skipping visualization")
-                            else:
-                                print(f"❌ Invalid input: '{viz_input}'. Please enter 'y' or 'n'")
-                        except (EOFError, KeyboardInterrupt):
-                            print("\n⏹️ Skipping visualization")
-                    
-                except ValueError:
-                    print("❌ Invalid input")
+                        viz_input = input("\\nCreate route visualization? (y/n): ").strip().lower()
+                        if viz_input in ['y', 'yes']:
+                            save_file = f"route_{start_node}_{target_distance}km.png"
+                            planner.create_route_visualization(result, save_file)
+                
                 except KeyboardInterrupt:
-                    print("\n⏹️ Operation cancelled")
+                    print("\\n⏹️ Operation cancelled")
+                
+            elif choice == '3':
+                # Show solver information
+                solver_info = route_optimizer.get_solver_info()
+                print("\\n🔧 Solver Information:")
+                print(f"   Type: {solver_info['solver_type']}")
+                print(f"   Class: {solver_info['solver_class']}")
+                print(f"   Graph nodes: {solver_info['graph_nodes']}")
+                print(f"   Graph edges: {solver_info['graph_edges']}")
+                print(f"   Available algorithms: {', '.join(solver_info['available_algorithms'])}")
                 
             elif choice == '4':
                 print("👋 Goodbye!")
@@ -560,16 +449,17 @@ def interactive_mode():
                 print("❌ Invalid choice")
                 
         except KeyboardInterrupt:
-            print("\n👋 Goodbye!")
+            print("\\n👋 Goodbye!")
             break
         except EOFError:
-            print("\n👋 Goodbye!")
+            print("\\n👋 Goodbye!")
             break
+
 
 def main():
     """Main CLI entry point"""
     parser = argparse.ArgumentParser(
-        description='Running Route Optimizer - Command Line Interface',
+        description='Refactored Running Route Optimizer - Command Line Interface',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
     
@@ -604,16 +494,19 @@ def main():
         interactive_mode()
     else:
         # Command line mode
-        planner = CLIRoutePlanner()
-        if not planner.load_network():
+        planner = RefactoredCLIRoutePlanner()
+        
+        if not planner.initialize_services():
             sys.exit(1)
+        
+        route_optimizer = planner.services['route_optimizer']
         
         # Map objective
         obj_map = {
-            'distance': RouteObjective.MINIMIZE_DISTANCE,
-            'elevation': RouteObjective.MAXIMIZE_ELEVATION,
-            'balanced': RouteObjective.BALANCED_ROUTE,
-            'difficulty': RouteObjective.MINIMIZE_DIFFICULTY
+            'distance': route_optimizer.RouteObjective.MINIMIZE_DISTANCE,
+            'elevation': route_optimizer.RouteObjective.MAXIMIZE_ELEVATION,
+            'balanced': route_optimizer.RouteObjective.BALANCED_ROUTE,
+            'difficulty': route_optimizer.RouteObjective.MINIMIZE_DIFFICULTY
         }
         
         result = planner.generate_route(
@@ -624,6 +517,7 @@ def main():
         if result:
             planner.display_route_stats(result)
             planner.generate_directions(result)
+
 
 if __name__ == "__main__":
     main()

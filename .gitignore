@@ -1,0 +1,8 @@
+cache/
+venv/
+__pycache__/
+cached_graph_*
+examples/
+srtm_20_05.hdr
+srtm_20_05.tfw
+srtm_20_05.tif

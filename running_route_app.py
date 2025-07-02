@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Running Route Optimizer - Interactive Web Application
-Streamlit-based UI for generating optimized running routes with elevation data
+Refactored Running Route Optimizer - Streamlit Web Application
+Uses shared route services for consistent functionality with CLI
 """
 
 import streamlit as st
@@ -10,92 +10,99 @@ from streamlit_folium import st_folium
 import plotly.express as px
 import plotly.graph_objects as go
 import pandas as pd
-import osmnx as ox
 import numpy as np
 import time
-from route import add_elevation_to_graph, add_elevation_to_edges, add_running_weights
-try:
-    from tsp_solver_fast import FastRunningRouteOptimizer as RunningRouteOptimizer
-    from tsp_solver_fast import RouteObjective
-    print("✅ Streamlit using fast TSP solver")
-except ImportError:
-    from tsp_solver import RunningRouteOptimizer, RouteObjective
-    print("⚠️ Streamlit using standard TSP solver")
-import networkx as nx
+
+from route_services import (
+    NetworkManager, RouteOptimizer, RouteAnalyzer, 
+    ElevationProfiler, RouteFormatter
+)
 
 # Configure page
 st.set_page_config(
-    page_title="Running Route Optimizer",
+    page_title="Running Route Optimizer (Refactored)",
     page_icon="🏃",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Initialize session state
-if 'graph' not in st.session_state:
-    st.session_state.graph = None
-if 'current_route' not in st.session_state:
-    st.session_state.current_route = None
-if 'route_result' not in st.session_state:
-    st.session_state.route_result = None
+# Add refactored banner
+st.markdown("""
+<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
+    ✨ <strong>Refactored Version</strong> - Now using shared route services for consistency with CLI
+</div>
+""", unsafe_allow_html=True)
 
-def load_street_network():
-    """Load and cache street network with elevation data"""
-    if st.session_state.graph is None:
-        with st.spinner("Loading street network and elevation data..."):
-            try:
-                # Use cached graph loader
-                from graph_cache import load_or_generate_graph
-                
-                center_point = (37.1299, -80.4094)
-                graph = load_or_generate_graph(
-                    center_point=center_point,
-                    radius_m=800,  # Use cached 800m network
-                    network_type='all'
-                )
-                
-                if graph:
-                    st.session_state.graph = graph
-                    st.success(f"Loaded {len(graph.nodes)} intersections and {len(graph.edges)} road segments")
-                else:
-                    st.error("Failed to load street network")
-                    return None
-                    
-            except Exception as e:
-                st.error(f"Failed to load street network: {e}")
+@st.cache_resource
+def initialize_route_services():
+    """Initialize and cache route services"""
+    try:
+        with st.spinner("Initializing route planning services..."):
+            # Create network manager and load graph
+            network_manager = NetworkManager()
+            graph = network_manager.load_network(radius_km=0.8)
+            
+            if not graph:
+                st.error("Failed to load street network")
                 return None
-    
-    return st.session_state.graph
+            
+            # Create all services
+            services = {
+                'network_manager': network_manager,
+                'route_optimizer': RouteOptimizer(graph),
+                'route_analyzer': RouteAnalyzer(graph),
+                'elevation_profiler': ElevationProfiler(graph),
+                'route_formatter': RouteFormatter(),
+                'graph': graph
+            }
+            
+            # Show success message
+            stats = network_manager.get_network_stats(graph)
+            st.success(f"✅ Loaded {stats['nodes']} intersections and {stats['edges']} road segments")
+            
+            return services
+            
+    except Exception as e:
+        st.error(f"Failed to initialize services: {e}")
+        return None
 
-def create_base_map(graph):
-    """Create base Folium map with all intersections"""
+def create_base_map(services):
+    """Create base map with street network nodes"""
+    if not services:
+        return None
+    
+    network_manager = services['network_manager']
+    graph = services['graph']
+    
     # Get center coordinates
-    center_lat = np.mean([data['y'] for _, data in graph.nodes(data=True)])
-    center_lon = np.mean([data['x'] for _, data in graph.nodes(data=True)])
+    center_lat, center_lon = network_manager.center_point
     
     # Create map
     m = folium.Map(
         location=[center_lat, center_lon],
-        zoom_start=14,
+        zoom_start=15,
         tiles='OpenStreetMap'
     )
     
-    # Add intersection markers
-    for node_id, data in list(graph.nodes(data=True))[:200]:  # Limit for performance
+    # Add sample of nodes to map (to avoid overcrowding)
+    node_sample = list(graph.nodes(data=True))[:50]  # Show first 50 nodes
+    
+    for node_id, data in node_sample:
+        lat, lon = data['y'], data['x']
         elevation = data.get('elevation', 0)
         
-        # Color based on elevation
-        if elevation < 630:
-            color = 'blue'
-        elif elevation < 650:
-            color = 'green'
-        elif elevation < 670:
-            color = 'orange'
-        else:
+        # Color code by elevation
+        if elevation > 625:
             color = 'red'
+        elif elevation > 615:
+            color = 'orange'
+        elif elevation > 605:
+            color = 'yellow'
+        else:
+            color = 'green'
         
         folium.CircleMarker(
-            location=[data['y'], data['x']],
+            location=[lat, lon],
             radius=3,
             popup=f"Node: {node_id}<br>Elevation: {elevation:.0f}m",
             color=color,
@@ -105,30 +112,17 @@ def create_base_map(graph):
     
     return m
 
-def get_nearby_nodes(graph, lat, lon, radius_km=0.5):
-    """Get nodes near a clicked location"""
-    from route import haversine_distance
-    
-    nearby = []
-    for node_id, data in graph.nodes(data=True):
-        distance = haversine_distance(lat, lon, data['y'], data['x'])
-        if distance <= radius_km * 1000:  # Convert to meters
-            nearby.append((node_id, distance, data))
-    
-    # Sort by distance
-    nearby.sort(key=lambda x: x[1])
-    return nearby[:10]  # Return closest 10
-
-def create_route_map(graph, route_result):
+def create_route_map(services, route_result):
     """Create map showing the optimized route"""
-    if not route_result or not route_result.get('route'):
+    if not services or not route_result or not route_result.get('route'):
         return None
     
+    network_manager = services['network_manager']
+    graph = services['graph']
     route = route_result['route']
     
     # Get center coordinates
-    center_lat = np.mean([data['y'] for _, data in graph.nodes(data=True)])
-    center_lon = np.mean([data['x'] for _, data in graph.nodes(data=True)])
+    center_lat, center_lon = network_manager.center_point
     
     # Create map
     m = folium.Map(
@@ -137,93 +131,68 @@ def create_route_map(graph, route_result):
         tiles='OpenStreetMap'
     )
     
-    # Get route coordinates
+    # Get route coordinates and elevations
     route_coords = []
     route_elevations = []
     
-    for i, node in enumerate(route):
+    for node in route:
         if node in graph.nodes:
             node_data = graph.nodes[node]
             coord = [node_data['y'], node_data['x']]
             route_coords.append(coord)
             route_elevations.append(node_data.get('elevation', 0))
-            
-            # Add markers for route points
-            color = 'green' if i == 0 else 'red' if i == len(route) - 1 else 'blue'
-            icon = 'play' if i == 0 else 'stop' if i == len(route) - 1 else 'record'
-            
-            folium.Marker(
-                location=coord,
-                popup=f"{'Start' if i == 0 else 'Finish' if i == len(route) - 1 else f'Point {i+1}'}<br>"
-                      f"Elevation: {route_elevations[-1]:.0f}m",
-                icon=folium.Icon(color=color, icon=icon)
-            ).add_to(m)
     
-    # Add return to start
+    # Add route path
     if route_coords:
-        route_coords.append(route_coords[0])
-    
-    # Draw route path
-    if len(route_coords) > 1:
+        # Close the loop
+        route_coords_closed = route_coords + [route_coords[0]]
+        
         folium.PolyLine(
-            locations=route_coords,
-            weight=4,
+            route_coords_closed,
             color='red',
-            opacity=0.8,
-            popup="Running Route"
+            weight=3,
+            opacity=0.8
         ).add_to(m)
+        
+        # Add markers for route points
+        for i, (coord, elevation) in enumerate(zip(route_coords, route_elevations)):
+            if i == 0:
+                # Start/finish marker
+                folium.Marker(
+                    coord,
+                    popup=f"Start/Finish<br>Elevation: {elevation:.0f}m",
+                    icon=folium.Icon(color='green', icon='play')
+                ).add_to(m)
+            else:
+                # Route point markers
+                folium.CircleMarker(
+                    coord,
+                    radius=5,
+                    popup=f"Point {i+1}<br>Elevation: {elevation:.0f}m",
+                    color='blue',
+                    fill=True
+                ).add_to(m)
     
     return m
 
-def create_elevation_profile(graph, route_result):
-    """Create elevation profile chart"""
-    if not route_result or not route_result.get('route'):
+def create_elevation_plot(services, route_result):
+    """Create elevation profile plot using shared services"""
+    if not services or not route_result:
         return None
     
-    route = route_result['route']
-    stats = route_result.get('stats', {})
+    elevation_profiler = services['elevation_profiler']
     
-    # Get elevation data for route
-    elevations = []
-    distances = [0]  # Start at 0
-    cumulative_distance = 0
+    # Generate profile data
+    profile_data = elevation_profiler.generate_profile_data(route_result)
     
-    for i, node in enumerate(route):
-        if node in graph.nodes:
-            elevations.append(graph.nodes[node].get('elevation', 0))
-            
-            if i > 0:
-                # Calculate distance from previous node
-                prev_node = route[i-1]
-                if prev_node in graph.nodes:
-                    from route import haversine_distance
-                    prev_data = graph.nodes[prev_node]
-                    curr_data = graph.nodes[node]
-                    segment_dist = haversine_distance(
-                        prev_data['y'], prev_data['x'],
-                        curr_data['y'], curr_data['x']
-                    )
-                    cumulative_distance += segment_dist
-                    distances.append(cumulative_distance)
-    
-    # Add return to start
-    if len(route) > 1 and route[0] in graph.nodes and route[-1] in graph.nodes:
-        from route import haversine_distance
-        start_data = graph.nodes[route[0]]
-        end_data = graph.nodes[route[-1]]
-        return_dist = haversine_distance(
-            end_data['y'], end_data['x'],
-            start_data['y'], start_data['x']
-        )
-        cumulative_distance += return_dist
-        distances.append(cumulative_distance)
-        elevations.append(elevations[0])  # Back to start elevation
-    
-    # Convert distances to km
-    distances_km = [d / 1000 for d in distances]
+    if not profile_data or not profile_data.get('elevations'):
+        return None
     
     # Create plotly figure
     fig = go.Figure()
+    
+    distances_km = profile_data['distances_km']
+    elevations = profile_data['elevations']
     
     fig.add_trace(go.Scatter(
         x=distances_km,
@@ -235,8 +204,11 @@ def create_elevation_profile(graph, route_result):
         fill='tonexty'
     ))
     
+    stats = profile_data.get('elevation_stats', {})
+    total_distance = profile_data.get('total_distance_km', 0)
+    
     fig.update_layout(
-        title=f"Elevation Profile - {stats.get('total_distance_km', 0):.2f}km Route",
+        title=f"Elevation Profile - {total_distance:.2f}km Route",
         xaxis_title="Distance (km)",
         yaxis_title="Elevation (m)",
         hovermode='x unified',
@@ -245,110 +217,63 @@ def create_elevation_profile(graph, route_result):
     
     return fig
 
-def generate_directions(graph, route_result):
-    """Generate turn-by-turn directions"""
-    if not route_result or not route_result.get('route'):
-        return []
-    
-    route = route_result['route']
-    directions = []
-    
-    # Start instruction
-    if route and route[0] in graph.nodes:
-        start_data = graph.nodes[route[0]]
-        directions.append({
-            'step': 1,
-            'instruction': f"Start at intersection (Node {route[0]})",
-            'elevation': f"{start_data.get('elevation', 0):.0f}m",
-            'distance': "0.0 km"
-        })
-    
-    # Route segments
-    cumulative_distance = 0
-    for i in range(1, len(route)):
-        if route[i] in graph.nodes and route[i-1] in graph.nodes:
-            curr_data = graph.nodes[route[i]]
-            prev_data = graph.nodes[route[i-1]]
-            
-            # Calculate segment distance
-            from route import haversine_distance
-            segment_dist = haversine_distance(
-                prev_data['y'], prev_data['x'],
-                curr_data['y'], curr_data['x']
-            )
-            cumulative_distance += segment_dist
-            
-            # Direction instruction
-            elevation_change = curr_data.get('elevation', 0) - prev_data.get('elevation', 0)
-            if elevation_change > 5:
-                terrain = "uphill"
-            elif elevation_change < -5:
-                terrain = "downhill"
-            else:
-                terrain = "level"
-            
-            directions.append({
-                'step': i + 1,
-                'instruction': f"Continue to intersection (Node {route[i]}) - {terrain}",
-                'elevation': f"{curr_data.get('elevation', 0):.0f}m ({elevation_change:+.0f}m)",
-                'distance': f"{cumulative_distance/1000:.2f} km"
-            })
-    
-    # Return to start
-    if len(route) > 1:
-        directions.append({
-            'step': len(route) + 1,
-            'instruction': "Return to starting point to complete the loop",
-            'elevation': f"{directions[0]['elevation']}",
-            'distance': f"{route_result.get('stats', {}).get('total_distance_km', 0):.2f} km"
-        })
-    
-    return directions
-
 def main():
-    """Main Streamlit app"""
+    """Main Streamlit app using refactored services"""
     
     # Header
     st.title("🏃 Running Route Optimizer")
     st.markdown("Generate optimized running routes with elevation data for Christiansburg, VA")
     
-    # Load network
-    graph = load_street_network()
+    # Initialize services
+    services = initialize_route_services()
+    
+    if not services:
+        st.error("❌ Failed to initialize route services. Please refresh the page.")
+        return
+    
+    # Get service instances
+    network_manager = services['network_manager']
+    route_optimizer = services['route_optimizer']
+    route_analyzer = services['route_analyzer']
+    elevation_profiler = services['elevation_profiler']
+    route_formatter = services['route_formatter']
+    graph = services['graph']
     
     # Sidebar controls
     st.sidebar.header("Route Parameters")
+    
+    # Show solver information
+    solver_info = route_optimizer.get_solver_info()
+    st.sidebar.success(f"✅ Using {solver_info['solver_type']} TSP solver")
     
     # Target distance
     target_distance = st.sidebar.slider(
         "Target Distance (km)",
         min_value=0.5,
         max_value=10.0,
-        value=2.0,
+        value=5.0,
         step=0.1,
         help="Desired route distance (±20% tolerance)"
     )
     
     # Route objective
-    objective_options = {
-        "Shortest Route": RouteObjective.MINIMIZE_DISTANCE,
-        "Maximum Elevation Gain": RouteObjective.MAXIMIZE_ELEVATION,
-        "Balanced Route": RouteObjective.BALANCED_ROUTE,
-        "Easiest Route": RouteObjective.MINIMIZE_DIFFICULTY
-    }
+    objectives = route_optimizer.get_available_objectives()
     
-    selected_objective = st.sidebar.selectbox(
+    selected_objective_name = st.sidebar.selectbox(
         "Route Objective",
-        options=list(objective_options.keys()),
+        options=list(objectives.keys()),
         index=0,
         help="Choose optimization strategy"
     )
+    selected_objective = objectives[selected_objective_name]
     
     # Algorithm selection
+    algorithms = route_optimizer.get_available_algorithms()
     algorithm = st.sidebar.selectbox(
         "Algorithm",
-        options=["nearest_neighbor", "genetic"],
+        options=algorithms,
         index=0,
-        help="Optimization algorithm (genetic is slower but better)"
+        help="Optimization algorithm (genetic is slower but potentially better)"
     )
     
     # Difficulty level info
@@ -368,98 +293,174 @@ def main():
         st.markdown("Click on the map to choose your starting intersection:")
         
         # Create and display map
-        base_map = create_base_map(graph)
-        map_data = st_folium(base_map, width=700, height=400)
+        base_map = create_base_map(services)
+        if base_map:
+            map_data = st_folium(base_map, width=700, height=400)
+        else:
+            st.error("Failed to create map")
+            return
         
-        # Check for map click
-        start_node = None
+        # Check for map click or use default
+        start_node = 1529188403  # Default starting node
+        
         if map_data['last_clicked']:
             clicked_lat = map_data['last_clicked']['lat']
             clicked_lon = map_data['last_clicked']['lng']
             
-            # Find nearby nodes
-            nearby_nodes = get_nearby_nodes(graph, clicked_lat, clicked_lon)
+            # Find nearby nodes using network manager
+            nearby_nodes = network_manager.get_nearby_nodes(
+                graph, clicked_lat, clicked_lon, radius_km=0.1, max_nodes=1
+            )
             
             if nearby_nodes:
                 start_node = nearby_nodes[0][0]  # Closest node
                 st.success(f"Selected starting point: Node {start_node}")
-                st.info(f"Elevation: {graph.nodes[start_node].get('elevation', 0):.0f}m")
+                node_info = network_manager.get_node_info(graph, start_node)
+                st.info(f"Elevation: {node_info['elevation']:.0f}m")
+        else:
+            # Show default node info
+            if network_manager.validate_node_exists(graph, start_node):
+                node_info = network_manager.get_node_info(graph, start_node)
+                st.info(f"Default starting point: Node {start_node}")
+                st.info(f"Elevation: {node_info['elevation']:.0f}m")
+                st.markdown("💡 *Click on the map to select a different starting point*")
+            else:
+                st.warning("Default starting point not found in current network")
         
         # Generate route button
-        if st.button("🚀 Generate Optimized Route", type="primary", disabled=start_node is None):
-            if start_node:
+        if st.button("🚀 Generate Optimized Route", type="primary"):
+            if start_node and network_manager.validate_node_exists(graph, start_node):
                 with st.spinner("Optimizing route..."):
-                    optimizer = RunningRouteOptimizer(graph)
                     
-                    try:
-                        result = optimizer.find_optimal_route(
-                            start_node=start_node,
-                            target_distance_km=target_distance,
-                            objective=objective_options[selected_objective],
-                            algorithm=algorithm
-                        )
-                        
+                    # Generate route using route optimizer
+                    result = route_optimizer.optimize_route(
+                        start_node=start_node,
+                        target_distance_km=target_distance,
+                        objective=selected_objective,
+                        algorithm=algorithm
+                    )
+                    
+                    if result:
+                        # Store result in session state
                         st.session_state.route_result = result
-                        st.session_state.current_route = result['route']
                         
-                        st.success("Route optimized successfully!")
+                        # Show success message
+                        solver_info = result.get('solver_info', {})
+                        st.success(f"✅ Route generated in {solver_info.get('solve_time', 0):.2f} seconds")
                         
-                    except Exception as e:
-                        st.error(f"Route optimization failed: {e}")
+                        # Display route summary
+                        summary = route_formatter.format_route_summary(result, 'web')
+                        st.markdown(f"**Route Summary:** {summary}")
+                        
+                    else:
+                        st.error("❌ Failed to generate route")
+            else:
+                st.error("❌ Invalid starting point selected")
     
     with col2:
         st.subheader("📊 Route Statistics")
         
-        if st.session_state.route_result:
+        # Display route statistics if available
+        if 'route_result' in st.session_state and st.session_state.route_result:
             result = st.session_state.route_result
-            stats = result['stats']
             
-            # Key metrics
-            st.metric("Distance", f"{stats.get('total_distance_km', 0):.2f} km")
-            st.metric("Elevation Gain", f"{stats.get('total_elevation_gain_m', 0):.0f} m")
-            st.metric("Max Grade", f"{stats.get('max_grade_percent', 0):.1f}%")
-            st.metric("Est. Time", f"{stats.get('estimated_time_min', 0):.0f} min")
+            # Format statistics for web display
+            analysis = route_analyzer.analyze_route(result)
+            difficulty = route_analyzer.get_route_difficulty_rating(result)
+            analysis['difficulty'] = difficulty
             
-            # Objective info
-            st.info(f"**Objective:** {selected_objective}")
-            st.info(f"**Algorithm:** {algorithm.title()}")
-            st.info(f"**Solve Time:** {result.get('solve_time', 0):.2f}s")
+            web_stats = route_formatter.format_route_stats_web(result, analysis)
             
+            # Display metrics
+            for metric_name, metric_data in web_stats.items():
+                if metric_name == 'difficulty':
+                    # Special handling for difficulty badge
+                    badge = route_formatter.create_difficulty_badge(analysis)
+                    st.markdown(f"**Difficulty:** <span style='color: {badge['color']}'>{badge['text']}</span> {badge['score']}", unsafe_allow_html=True)
+                else:
+                    st.metric(
+                        metric_name.replace('_', ' ').title(),
+                        metric_data['value']
+                    )
         else:
-            st.info("Select a starting point and generate a route to see statistics")
+            st.info("Generate a route to see statistics")
     
-    # Route visualization and details
-    if st.session_state.route_result:
-        st.subheader("🗺️ Optimized Route")
+    # Route visualization section
+    if 'route_result' in st.session_state and st.session_state.route_result:
+        result = st.session_state.route_result
         
-        # Route map
-        route_map = create_route_map(graph, st.session_state.route_result)
+        st.subheader("🗺️ Route Visualization")
+        
+        # Create route map
+        route_map = create_route_map(services, result)
         if route_map:
             st_folium(route_map, width=700, height=400)
         
-        # Elevation profile
         st.subheader("📈 Elevation Profile")
-        elevation_fig = create_elevation_profile(graph, st.session_state.route_result)
-        if elevation_fig:
-            st.plotly_chart(elevation_fig, use_container_width=True)
+        
+        # Create elevation plot
+        elevation_plot = create_elevation_plot(services, result)
+        if elevation_plot:
+            st.plotly_chart(elevation_plot, use_container_width=True)
         
         # Turn-by-turn directions
         st.subheader("📋 Turn-by-Turn Directions")
-        directions = generate_directions(graph, st.session_state.route_result)
         
-        if directions:
-            directions_df = pd.DataFrame(directions)
-            st.dataframe(
-                directions_df,
-                use_container_width=True,
-                hide_index=True,
-                column_config={
-                    "step": "Step",
-                    "instruction": "Direction",
-                    "elevation": "Elevation",
-                    "distance": "Cumulative Distance"
-                }
-            )
+        directions = route_analyzer.generate_directions(result)
+        formatted_directions = route_formatter.format_directions_web(directions)
+        
+        # Display directions in a table
+        if formatted_directions:
+            df = pd.DataFrame(formatted_directions)
+            # Reorder columns for better display
+            column_order = ['step', 'instruction', 'elevation', 'elevation_change', 'distance', 'terrain']
+            df = df[column_order]
+            st.dataframe(df, use_container_width=True)
+        
+        # Additional analysis
+        st.subheader("🔍 Route Analysis")
+        
+        # Elevation zones
+        zones = elevation_profiler.get_elevation_zones(result, zone_count=3)
+        if zones:
+            st.markdown("**Elevation Zones:**")
+            for zone in zones:
+                st.markdown(f"- Zone {zone['zone_number']}: {zone['start_km']:.2f}-{zone['end_km']:.2f}km, "
+                           f"Avg elevation: {zone['avg_elevation']:.0f}m")
+        
+        # Climbing segments
+        climbing_segments = elevation_profiler.get_climbing_segments(result, min_gain=10)
+        if climbing_segments:
+            st.markdown("**Climbing Segments:**")
+            for i, segment in enumerate(climbing_segments, 1):
+                st.markdown(f"- Climb {i}: {segment['start_km']:.2f}-{segment['end_km']:.2f}km, "
+                           f"Gain: {segment['elevation_gain']:.0f}m, "
+                           f"Grade: {segment['avg_grade']:.1f}%")
+        
+        # Export options
+        st.subheader("💾 Export Options")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # JSON export
+            if st.button("📄 Export as JSON"):
+                profile_data = elevation_profiler.generate_profile_data(result)
+                json_data = route_formatter.export_route_json(
+                    result, analysis, directions, profile_data
+                )
+                st.download_button(
+                    label="Download JSON",
+                    data=json_data,
+                    file_name=f"route_{start_node}_{target_distance}km.json",
+                    mime="application/json"
+                )
+        
+        with col2:
+            # Route summary
+            if st.button("📋 Generate Summary"):
+                summary = route_formatter.format_route_summary(result, 'cli')
+                st.code(summary)
 
 if __name__ == "__main__":
     main()
