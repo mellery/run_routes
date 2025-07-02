@@ -14,7 +14,13 @@ import osmnx as ox
 import numpy as np
 import time
 from route import add_elevation_to_graph, add_elevation_to_edges, add_running_weights
-from tsp_solver import RunningRouteOptimizer, RouteObjective
+try:
+    from tsp_solver_fast import FastRunningRouteOptimizer as RunningRouteOptimizer
+    from tsp_solver_fast import RouteObjective
+    print("✅ Streamlit using fast TSP solver")
+except ImportError:
+    from tsp_solver import RunningRouteOptimizer, RouteObjective
+    print("⚠️ Streamlit using standard TSP solver")
 import networkx as nx
 
 # Configure page
