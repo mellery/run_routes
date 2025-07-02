@@ -205,23 +205,45 @@ def create_distance_constrained_subgraph(graph, start_node, max_distance_km):
 
 def main():
     """Main execution function"""
-    # Define the place and SRTM file path
-    place = 'Christiansburg, Virginia, USA'
-    srtm_file = 'srtm_20_05.tif'  # Correct SRTM file for Virginia area
+    print("Loading street network with elevation data...")
+    
+    try:
+        # Use cached graph loader for faster execution
+        from graph_cache import load_or_generate_graph
+        
+        center_point = (37.1299, -80.4094)  # Christiansburg, VA
+        street_data = load_or_generate_graph(
+            center_point=center_point,
+            radius_m=1200,
+            network_type='all'
+        )
+        
+        if not street_data:
+            print("❌ Failed to load street network")
+            return
+            
+        print(f"✅ Loaded street network: {len(street_data.nodes)} nodes, {len(street_data.edges)} edges")
+        
+    except Exception as e:
+        print(f"❌ Error loading cached graph, falling back to direct method: {e}")
+        
+        # Fallback to original method
+        place = 'Christiansburg, Virginia, USA'
+        srtm_file = 'srtm_20_05.tif'
 
-    # Get street data
-    print("Downloading street data...")
-    street_data = get_street_data(place)
-    print(f"Street data downloaded! Number of nodes: {len(street_data.nodes)}")
+        # Get street data
+        print("Downloading street data...")
+        street_data = get_street_data(place)
+        print(f"Street data downloaded! Number of nodes: {len(street_data.nodes)}")
 
-    # Add elevation data to the graph
-    street_data = add_elevation_to_graph(street_data, srtm_file)
+        # Add elevation data to the graph
+        street_data = add_elevation_to_graph(street_data, srtm_file)
 
-    # Add elevation data to edges
-    street_data = add_elevation_to_edges(street_data)
+        # Add elevation data to edges
+        street_data = add_elevation_to_edges(street_data)
 
-    # Add running-specific weights
-    street_data = add_running_weights(street_data)
+        # Add running-specific weights
+        street_data = add_running_weights(street_data)
 
     # Print information for a specific node ID
     specific_node_id = 216507089  # Replace with the actual node ID you want to check
