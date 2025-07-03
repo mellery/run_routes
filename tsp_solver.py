@@ -207,18 +207,47 @@ class NearestNeighborTSP(TSPSolver):
         return route, cost
     
     def _get_closest_nodes(self, max_nodes: int) -> List[int]:
-        """Get the closest N nodes to the start node"""
+        """Get nodes distributed at appropriate distances for target route length"""
         distances = [(n, self.distance_matrix[self.start_node][n]) 
                     for n in self.nodes if n != self.start_node]
         distances.sort(key=lambda x: x[1])
-        return [n for n, d in distances[:max_nodes]]
+        
+        # Filter out nodes that are too close for meaningful routes
+        min_distance_m = 200.0  # Minimum 200m from start for meaningful routes
+        filtered_distances = [(node, dist) for node, dist in distances if dist >= min_distance_m]
+        
+        if len(filtered_distances) < max_nodes:
+            print(f"    ⚠️ Only {len(filtered_distances)} nodes > {min_distance_m}m, using closest available")
+            filtered_distances = distances  # Fall back to all nodes if not enough distant ones
+        
+        # Take nodes from the filtered list with better distribution
+        if len(filtered_distances) > max_nodes * 2:
+            # Take every nth node for better distribution
+            spacing = len(filtered_distances) // max_nodes
+            result = [filtered_distances[i * spacing][0] for i in range(max_nodes) 
+                     if i * spacing < len(filtered_distances)]
+        else:
+            result = [n for n, d in filtered_distances[:max_nodes]]
+        
+        return result
 
 
 class GeneticAlgorithmTSP(TSPSolver):
     """Genetic Algorithm TSP solver - better optimization but slower"""
     
-    def __init__(self, graph: nx.Graph, start_node: int, objective: str = RouteObjective.MINIMIZE_DISTANCE):
-        super().__init__(graph, start_node, objective)
+    def __init__(self, graph: nx.Graph, start_node: int, objective: str = RouteObjective.MINIMIZE_DISTANCE, candidate_nodes: list = None):
+        # Override parent constructor to use candidate nodes if provided
+        if candidate_nodes:
+            self.graph = graph
+            self.start_node = start_node
+            self.objective = objective
+            self.nodes = candidate_nodes
+            print(f"  Using candidate nodes for genetic algorithm: {len(self.nodes)} nodes")
+            # Build distance matrix with candidate nodes only
+            self._build_distance_matrix()
+        else:
+            super().__init__(graph, start_node, objective)
+            
         # Reduced parameters for better performance
         self.population_size = 20  # Was 50
         self.generations = 30      # Was 100
@@ -384,32 +413,71 @@ class GeneticAlgorithmTSP(TSPSolver):
         return mutated
     
     def _get_closest_nodes(self, max_nodes: int) -> List[int]:
-        """Get the closest N nodes to the start node"""
+        """Get nodes distributed at appropriate distances for target route length"""
         distances = [(n, self.distance_matrix[self.start_node][n]) 
                     for n in self.nodes if n != self.start_node]
         distances.sort(key=lambda x: x[1])
-        return [n for n, d in distances[:max_nodes]]
+        
+        # Filter out nodes that are too close for meaningful routes
+        min_distance_m = 200.0  # Minimum 200m from start for meaningful routes
+        filtered_distances = [(node, dist) for node, dist in distances if dist >= min_distance_m]
+        
+        if len(filtered_distances) < max_nodes:
+            filtered_distances = distances  # Fall back to all nodes if not enough distant ones
+        
+        # Take nodes from the filtered list with better distribution
+        if len(filtered_distances) > max_nodes * 2:
+            spacing = len(filtered_distances) // max_nodes
+            result = [filtered_distances[i * spacing][0] for i in range(max_nodes) 
+                     if i * spacing < len(filtered_distances)]
+        else:
+            result = [n for n, d in filtered_distances[:max_nodes]]
+        
+        return result
 
 
 class DistanceConstrainedTSP(TSPSolver):
     """TSP solver with distance constraints for running routes"""
     
     def __init__(self, graph: nx.Graph, start_node: int, target_distance_km: float, 
-                 tolerance: float = 0.15, objective: str = RouteObjective.MINIMIZE_DISTANCE):
-        super().__init__(graph, start_node, objective)
+                 tolerance: float = 0.15, objective: str = RouteObjective.MINIMIZE_DISTANCE,
+                 candidate_nodes: list = None):
+        # Override parent constructor to use candidate nodes if provided
+        self.graph = graph
+        self.start_node = start_node
+        self.objective = objective
+        self.candidate_nodes = candidate_nodes
+        
+        # Use candidate nodes if provided, otherwise use all nodes
+        if candidate_nodes:
+            self.nodes = candidate_nodes
+            print(f"  Using pre-filtered candidate nodes: {len(self.nodes)} nodes")
+        else:
+            self.nodes = list(graph.nodes())
+            print(f"  Using all graph nodes: {len(self.nodes)} nodes")
+        
+        # Build distance matrix
+        self._build_distance_matrix()
+        
         self.target_distance_m = target_distance_km * 1000
-        self.tolerance = tolerance
-        self.min_distance = self.target_distance_m * (1 - tolerance)
-        self.max_distance = self.target_distance_m * (1 + tolerance)
+        self.target_distance_km = target_distance_km
+        
+        # Use progressive tolerance for longer routes (more lenient for longer distances)
+        adjusted_tolerance = min(0.3, tolerance + (target_distance_km - 1) * 0.02)
+        self.tolerance = adjusted_tolerance
+        self.min_distance = self.target_distance_m * (1 - adjusted_tolerance)
+        self.max_distance = self.target_distance_m * (1 + adjusted_tolerance)
     
     def solve(self, algorithm: str = "nearest_neighbor") -> Tuple[List[int], float]:
         """Solve distance-constrained TSP"""
         
-        # Get candidate nodes within reasonable distance
-        max_radius_km = self.target_distance_m / 2000  # Conservative estimate
-        print(f"  Finding nodes within {max_radius_km:.1f}km radius...")
-        candidate_nodes = self._get_nodes_in_radius(max_radius_km)
-        print(f"  Found {len(candidate_nodes)} candidate nodes")
+        # Use candidate nodes if they were provided, otherwise filter intersections
+        if self.candidate_nodes:
+            candidate_nodes = [n for n in self.candidate_nodes if n != self.start_node]
+            print(f"  Using provided candidate nodes: {len(candidate_nodes)} candidate nodes")
+        else:
+            candidate_nodes = self._get_all_intersection_nodes()
+            print(f"  Using ALL intersections in network: {len(candidate_nodes)} candidate nodes")
         
         if algorithm == "genetic":
             solver = GeneticAlgorithmTSP(self.graph, self.start_node, self.objective)
@@ -421,7 +489,9 @@ class DistanceConstrainedTSP(TSPSolver):
         best_route = None
         best_cost = float('inf')
         
-        max_nodes_to_try = min(len(candidate_nodes) + 1, 15)  # Reduced from 20 for performance
+        # With aggressive filtering, we have clean intersections and can use many more nodes
+        adaptive_max = max(20, min(200, int(self.target_distance_km * 25)))
+        max_nodes_to_try = min(len(candidate_nodes) + 1, adaptive_max)
         print(f"  Trying different route sizes (3 to {max_nodes_to_try-1} nodes)...")
         
         for num_nodes in range(3, max_nodes_to_try):
@@ -466,13 +536,107 @@ class DistanceConstrainedTSP(TSPSolver):
         """Get nodes within specified radius of start node"""
         from route import get_nodes_within_distance
         return get_nodes_within_distance(self.graph, self.start_node, radius_km)
+    
+    def _get_all_intersection_nodes(self) -> List[int]:
+        """Get intersections using 20m aggressive proximity filtering"""
+        import math
+        
+        def haversine_distance(lat1, lon1, lat2, lon2):
+            """Calculate distance between two points using haversine formula"""
+            R = 6371000  # Earth radius in meters
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            return R * c
+        
+        # Get all potential intersections (non-degree-2 nodes)
+        all_intersections = []
+        for node_id, node_data in self.graph.nodes(data=True):
+            if self.graph.degree(node_id) != 2:
+                all_intersections.append({
+                    'node_id': node_id,
+                    'lat': node_data['y'],
+                    'lon': node_data['x'],
+                    'highway': node_data.get('highway', 'none')
+                })
+        
+        print(f"    Processing {len(all_intersections):,} potential intersections...")
+        
+        # Step 1: Find all highway-tagged (real) intersections
+        real_intersections = []
+        artifacts = []
+        
+        for node in all_intersections:
+            if node['highway'] in ['crossing', 'traffic_signals', 'stop', 'mini_roundabout']:
+                real_intersections.append(node)
+            else:
+                artifacts.append(node)
+        
+        # Step 2: Remove artifacts within 20m of real intersections
+        proximity_threshold_m = 20.0
+        artifacts_after_real_filtering = []
+        removed_near_real = 0
+        
+        for artifact in artifacts:
+            # Check if this artifact is too close to any real intersection
+            too_close_to_real = False
+            for real_node in real_intersections:
+                distance = haversine_distance(
+                    artifact['lat'], artifact['lon'],
+                    real_node['lat'], real_node['lon']
+                )
+                if distance < proximity_threshold_m:
+                    too_close_to_real = True
+                    break
+            
+            if too_close_to_real:
+                removed_near_real += 1
+            else:
+                artifacts_after_real_filtering.append(artifact)
+        
+        # Step 3: Remove artifacts within 20m of other artifacts (clustering removal)
+        final_kept_artifacts = []
+        removed_by_clustering = 0
+        
+        for artifact in artifacts_after_real_filtering:
+            # Check if this artifact is too close to any already-kept artifact
+            too_close_to_kept = False
+            for kept_artifact in final_kept_artifacts:
+                distance = haversine_distance(
+                    artifact['lat'], artifact['lon'],
+                    kept_artifact['lat'], kept_artifact['lon']
+                )
+                if distance < proximity_threshold_m:
+                    too_close_to_kept = True
+                    break
+            
+            if too_close_to_kept:
+                removed_by_clustering += 1
+            else:
+                final_kept_artifacts.append(artifact)
+        
+        # Combine final intersections
+        final_intersection_nodes = [node['node_id'] for node in real_intersections] + \
+                                  [node['node_id'] for node in final_kept_artifacts]
+        
+        total_removed = removed_near_real + removed_by_clustering
+        
+        print(f"    20m aggressive filtering results:")
+        print(f"      Real intersections: {len(real_intersections)}")
+        print(f"      Kept artifacts: {len(final_kept_artifacts)} (>20m apart)")
+        print(f"      Total kept: {len(final_intersection_nodes)}")
+        print(f"      Removed: {total_removed} ({(total_removed/len(all_intersections)*100):.1f}%)")
+        
+        return final_intersection_nodes
 
 
 class RunningRouteOptimizer:
     """Main class for running route optimization"""
     
-    def __init__(self, graph: nx.Graph):
+    def __init__(self, graph: nx.Graph, candidate_nodes: list = None):
         self.graph = graph
+        self.candidate_nodes = candidate_nodes
     
     def find_optimal_route(self, start_node: int, target_distance_km: float, 
                           objective: str = RouteObjective.MINIMIZE_DISTANCE,
@@ -490,7 +654,7 @@ class RunningRouteOptimizer:
         # Create distance-constrained solver
         solver = DistanceConstrainedTSP(
             self.graph, start_node, target_distance_km, 
-            tolerance=0.2, objective=objective
+            tolerance=0.2, objective=objective, candidate_nodes=self.candidate_nodes
         )
         
         # Solve the problem

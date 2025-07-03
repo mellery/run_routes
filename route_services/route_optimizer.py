@@ -86,8 +86,53 @@ class RouteOptimizer:
         print(f"   Solver: {self._solver_type}")
         
         try:
-            # Create optimizer instance
-            optimizer = self._optimizer_class(self.graph)
+            # Apply intelligent candidate filtering for all algorithms when using standard solver
+            # (standard solver builds expensive distance matrix, fast solver computes on-demand)
+            if self._solver_type == "standard":
+                candidate_nodes = self._get_intersection_nodes()
+                
+                # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
+                # Stage 1: Fast straight-line filtering to reduce candidate pool
+                max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
+                straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km)
+                
+                # Stage 2: Precise road distance filtering on reduced set
+                max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
+                filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km)
+                
+                if start_node not in filtered_candidates:
+                    filtered_candidates.append(start_node)
+                
+                print(f"   Candidate nodes: {len(filtered_candidates)} nodes")
+                print(f"   Filtering stages: {len(candidate_nodes)} → {len(straight_line_filtered)} → {len(filtered_candidates)}")
+                print(f"   Max road distance: {max_road_distance_km:.1f}km for {target_distance_km:.1f}km target route")
+                print(f"   Distance matrix size: {len(filtered_candidates)}² = {len(filtered_candidates)**2:,} calculations")
+                
+                # Pass filtered candidates to standard solver
+                optimizer = self._optimizer_class(self.graph, candidate_nodes=filtered_candidates)
+            else:
+                # Fast solver: Apply same filtering to reduce search space for all algorithms
+                candidate_nodes = self._get_intersection_nodes()
+                
+                # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
+                # Stage 1: Fast straight-line filtering to reduce candidate pool
+                max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
+                straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km)
+                
+                # Stage 2: Precise road distance filtering on reduced set
+                max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
+                filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km)
+                
+                if start_node not in filtered_candidates:
+                    filtered_candidates.append(start_node)
+                
+                print(f"   Candidate nodes: {len(filtered_candidates)} nodes")
+                print(f"   Filtering stages: {len(candidate_nodes)} → {len(straight_line_filtered)} → {len(filtered_candidates)}")
+                print(f"   Max road distance: {max_road_distance_km:.1f}km for {target_distance_km:.1f}km target route")
+                print(f"   Search space reduction: {len(candidate_nodes)/len(filtered_candidates):.1f}x")
+                
+                # Pass filtered candidates to fast solver for all algorithms
+                optimizer = self._optimizer_class(self.graph, filtered_candidates=filtered_candidates)
             
             # Record timing
             start_time = time.time()
@@ -182,6 +227,197 @@ class RouteOptimizer:
             'errors': errors,
             'warnings': warnings
         }
+    
+    def _create_filtered_graph(self, start_node: int) -> nx.Graph:
+        """Create a filtered graph that preserves connectivity but limits TSP solver nodes
+        
+        Instead of creating a subgraph (which breaks connectivity), we'll pass the full graph
+        but the TSP solver will only consider intersection nodes as candidates.
+        
+        Args:
+            start_node: Starting node ID
+            
+        Returns:
+            Full NetworkX graph (filtering handled in TSP solver)
+        """
+        # Return full graph - filtering will be handled in TSP solver
+        # This preserves connectivity for shortest path calculations
+        return self.graph
+    
+    def _get_intersection_nodes(self) -> list:
+        """Get intersection nodes using 20m aggressive proximity filtering
+        
+        Returns:
+            List of intersection node IDs
+        """
+        import math
+        
+        def haversine_distance(lat1, lon1, lat2, lon2):
+            """Calculate distance between two points using haversine formula"""
+            R = 6371000  # Earth radius in meters
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            return R * c
+        
+        # Get all potential intersections (non-degree-2 nodes)
+        all_intersections = []
+        for node_id, node_data in self.graph.nodes(data=True):
+            if self.graph.degree(node_id) != 2:
+                all_intersections.append({
+                    'node_id': node_id,
+                    'lat': node_data['y'],
+                    'lon': node_data['x'],
+                    'highway': node_data.get('highway', 'none')
+                })
+        
+        # Step 1: Find all highway-tagged (real) intersections
+        real_intersections = []
+        artifacts = []
+        
+        for node in all_intersections:
+            if node['highway'] in ['crossing', 'traffic_signals', 'stop', 'mini_roundabout']:
+                real_intersections.append(node)
+            else:
+                artifacts.append(node)
+        
+        # Step 2: Remove artifacts within 20m of real intersections
+        proximity_threshold_m = 20.0
+        artifacts_after_real_filtering = []
+        
+        for artifact in artifacts:
+            # Check if this artifact is too close to any real intersection
+            too_close_to_real = False
+            for real_node in real_intersections:
+                distance = haversine_distance(
+                    artifact['lat'], artifact['lon'],
+                    real_node['lat'], real_node['lon']
+                )
+                if distance < proximity_threshold_m:
+                    too_close_to_real = True
+                    break
+            
+            if not too_close_to_real:
+                artifacts_after_real_filtering.append(artifact)
+        
+        # Step 3: Remove artifacts within 20m of other artifacts (clustering removal)
+        final_kept_artifacts = []
+        
+        for artifact in artifacts_after_real_filtering:
+            # Check if this artifact is too close to any already-kept artifact
+            too_close_to_kept = False
+            for kept_artifact in final_kept_artifacts:
+                distance = haversine_distance(
+                    artifact['lat'], artifact['lon'],
+                    kept_artifact['lat'], kept_artifact['lon']
+                )
+                if distance < proximity_threshold_m:
+                    too_close_to_kept = True
+                    break
+            
+            if not too_close_to_kept:
+                final_kept_artifacts.append(artifact)
+        
+        # Combine final intersections
+        final_intersection_nodes = [node['node_id'] for node in real_intersections] + \
+                                  [node['node_id'] for node in final_kept_artifacts]
+        
+        return final_intersection_nodes
+    
+    def _filter_nodes_by_distance(self, candidate_nodes: list, start_node: int, max_radius_km: float) -> list:
+        """Filter candidate nodes by straight-line distance from start node
+        
+        Args:
+            candidate_nodes: List of candidate node IDs
+            start_node: Starting node ID
+            max_radius_km: Maximum radius in kilometers
+            
+        Returns:
+            List of filtered node IDs within radius
+        """
+        import math
+        
+        def haversine_distance(lat1, lon1, lat2, lon2):
+            """Calculate distance between two points using haversine formula"""
+            R = 6371000  # Earth radius in meters
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            return R * c
+        
+        # Get start node coordinates
+        start_data = self.graph.nodes[start_node]
+        start_lat, start_lon = start_data['y'], start_data['x']
+        max_radius_m = max_radius_km * 1000
+        
+        # Filter nodes by distance
+        filtered_nodes = []
+        for node in candidate_nodes:
+            node_data = self.graph.nodes[node]
+            node_lat, node_lon = node_data['y'], node_data['x']
+            distance = haversine_distance(start_lat, start_lon, node_lat, node_lon)
+            
+            if distance <= max_radius_m:
+                filtered_nodes.append(node)
+        
+        return filtered_nodes
+    
+    def _filter_nodes_by_road_distance(self, candidate_nodes: list, start_node: int, max_distance_km: float) -> list:
+        """Filter candidate nodes by actual road distance from start node
+        
+        Args:
+            candidate_nodes: List of candidate node IDs
+            start_node: Starting node ID
+            max_distance_km: Maximum road distance in kilometers
+            
+        Returns:
+            List of filtered node IDs within road distance
+        """
+        import networkx as nx
+        
+        max_distance_m = max_distance_km * 1000
+        filtered_nodes = []
+        total_candidates = len(candidate_nodes)
+        
+        print(f"     Filtering {total_candidates} candidates by road distance...")
+        
+        # Batch process in chunks to show progress and avoid timeout
+        chunk_size = 100
+        processed = 0
+        
+        for i in range(0, len(candidate_nodes), chunk_size):
+            chunk = candidate_nodes[i:i + chunk_size]
+            
+            for node in chunk:
+                if node == start_node:
+                    filtered_nodes.append(node)
+                    continue
+                
+                try:
+                    # Calculate shortest path distance
+                    path_length = nx.shortest_path_length(
+                        self.graph, start_node, node, weight='length'
+                    )
+                    
+                    if path_length <= max_distance_m:
+                        filtered_nodes.append(node)
+                        
+                except nx.NetworkXNoPath:
+                    # Node is not reachable, skip it
+                    pass
+                except Exception:
+                    # Any other error, skip this node
+                    pass
+            
+            processed += len(chunk)
+            if processed % 200 == 0 or processed >= total_candidates:
+                progress = (processed / total_candidates) * 100
+                print(f"     Progress: {processed}/{total_candidates} ({progress:.0f}%) - {len(filtered_nodes)} within range")
+        
+        print(f"     Road distance filtering: kept {len(filtered_nodes)}/{total_candidates} nodes")
+        return filtered_nodes
     
     def get_solver_info(self) -> Dict[str, Any]:
         """Get information about the current solver

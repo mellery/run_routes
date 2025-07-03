@@ -23,7 +23,7 @@ class RefactoredCLIRoutePlanner:
         self.services = None
         self.selected_start_node = 1529188403  # Default starting point
         
-    def initialize_services(self, center_point=None, radius_km=0.8):
+    def initialize_services(self, center_point=None, radius_km=5.0):
         """Initialize all route services
         
         Args:
@@ -69,7 +69,7 @@ class RefactoredCLIRoutePlanner:
             print(f"❌ Failed to initialize services: {e}")
             return False
     
-    def list_starting_points(self, num_points=10):
+    def list_starting_points(self, num_points=50):
         """List potential starting points
         
         Args:
@@ -86,11 +86,15 @@ class RefactoredCLIRoutePlanner:
         graph = self.services['graph']
         center_point = network_manager.center_point
         
-        # Get nearby nodes around center point
-        nearby_nodes = network_manager.get_nearby_nodes(
-            graph, center_point[0], center_point[1], 
-            radius_km=0.5, max_nodes=num_points
-        )
+        # Get all intersections in the network (city-wide)
+        all_intersections = network_manager.get_all_intersections(graph, max_nodes=num_points)
+        
+        # Convert to same format as nearby_nodes for compatibility
+        nearby_nodes = []
+        from route import haversine_distance
+        for node_id, data in all_intersections:
+            distance = haversine_distance(center_point[0], center_point[1], data['y'], data['x'])
+            nearby_nodes.append((node_id, distance, data))
         
         print(f"\n📍 Available Starting Points (showing {len(nearby_nodes)}):")
         print("-" * 70)
@@ -106,11 +110,11 @@ class RefactoredCLIRoutePlanner:
             node_list.append(node_id)
         
         print("-" * 70)
-        print("💡 Tip: You can enter the option number (1-10) or the full node ID")
+        print(f"💡 Tip: You can enter the option number (1-{num_points}) or the full node ID")
         
         return node_list
     
-    def select_starting_point(self, num_points=10):
+    def select_starting_point(self, num_points=50):
         """Interactive starting point selection
         
         Args:
