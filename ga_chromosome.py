@@ -62,9 +62,13 @@ class RouteSegment:
                     self.is_valid = False
                     return
                 
-                # Get edge properties
+                # Get edge properties (handle MultiGraph format)
                 edge_data = graph[node1][node2]
-                edge_length = edge_data.get('length', 0.0)
+                # Check if it's a MultiGraph format with nested keys
+                if 0 in edge_data:
+                    edge_length = edge_data[0].get('length', 0.0)
+                else:
+                    edge_length = edge_data.get('length', 0.0)
                 total_length += edge_length
                 
                 # Get node elevations

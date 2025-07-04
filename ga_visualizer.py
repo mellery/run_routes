@@ -120,7 +120,7 @@ class GAVisualizer:
         ax.set_title(title_text, fontsize=14, fontweight='bold', pad=20)
         
         # Set bounds and labels
-        self._set_map_bounds(ax)
+        self._set_map_bounds(ax, [chromosome] if chromosome.segments else None)
         ax.set_xlabel('Longitude', fontsize=12)
         ax.set_ylabel('Latitude', fontsize=12)
         
@@ -200,20 +200,33 @@ class GAVisualizer:
                 )
         
         # Plot fitness histogram
-        if population and any(c.fitness is not None for c in population):
-            fitness_values = [c.fitness for c in population if c.fitness is not None]
-            ax_fitness.hist(fitness_values, bins=20, alpha=0.7, color='skyblue', edgecolor='black')
+        fitness_values = [c.fitness for c in population if c and c.fitness is not None]
+        if fitness_values:
+            ax_fitness.hist(fitness_values, bins=min(10, len(fitness_values)), alpha=0.7, color='skyblue', edgecolor='black')
             ax_fitness.set_title('Fitness Distribution', fontsize=10)
             ax_fitness.set_xlabel('Fitness')
             ax_fitness.set_ylabel('Count')
+        else:
+            ax_fitness.text(0.5, 0.5, 'No Fitness\nData Yet', transform=ax_fitness.transAxes, 
+                           ha='center', va='center', fontsize=10)
+            ax_fitness.set_title('Fitness Distribution', fontsize=10)
         
         # Plot distance histogram
         if population:
-            distances = [c.get_total_distance() / 1000 for c in population]
-            ax_distance.hist(distances, bins=20, alpha=0.7, color='lightgreen', edgecolor='black')
+            distances = [c.get_total_distance() / 1000 for c in population if c]
+            if distances and max(distances) > 0:  # Only plot if we have real distances
+                ax_distance.hist(distances, bins=min(10, len(distances)), alpha=0.7, color='lightgreen', edgecolor='black')
+                ax_distance.set_title('Distance Distribution', fontsize=10)
+                ax_distance.set_xlabel('Distance (km)')
+                ax_distance.set_ylabel('Count')
+            else:
+                ax_distance.text(0.5, 0.5, 'Distance\nCalculation\nIssue', transform=ax_distance.transAxes, 
+                               ha='center', va='center', fontsize=10)
+                ax_distance.set_title('Distance Distribution', fontsize=10)
+        else:
+            ax_distance.text(0.5, 0.5, 'No Routes', transform=ax_distance.transAxes, 
+                           ha='center', va='center', fontsize=10)
             ax_distance.set_title('Distance Distribution', fontsize=10)
-            ax_distance.set_xlabel('Distance (km)')
-            ax_distance.set_ylabel('Count')
         
         # Population statistics table
         self._add_population_stats_table(ax_stats, population, generation)
@@ -221,7 +234,7 @@ class GAVisualizer:
         # Set main plot properties
         ax_main.set_title(f'Population Visualization - Generation {generation}', 
                          fontsize=16, fontweight='bold', pad=20)
-        self._set_map_bounds(ax_main)
+        self._set_map_bounds(ax_main, routes_to_plot)
         ax_main.set_xlabel('Longitude', fontsize=12)
         ax_main.set_ylabel('Latitude', fontsize=12)
         ax_main.grid(True, alpha=0.3)
@@ -266,7 +279,7 @@ class GAVisualizer:
                      f'Distance: {ga_stats["total_distance_km"]:.2f}km, '
                      f'Elevation: {ga_stats["total_elevation_gain_m"]:.1f}m',
                      fontsize=14, fontweight='bold')
-        self._set_map_bounds(ax1)
+        self._set_map_bounds(ax1, [ga_route])
         ax1.grid(True, alpha=0.3)
         
         # Plot TSP route if provided
@@ -278,12 +291,12 @@ class GAVisualizer:
                          f'Distance: {tsp_stats["distance_km"]:.2f}km, '
                          f'Elevation: {tsp_stats["elevation_gain_m"]:.1f}m',
                          fontsize=14, fontweight='bold')
+            self._set_map_bounds(ax2, [tsp_route])
         else:
             ax2.text(0.5, 0.5, 'TSP Route\nNot Available', 
                     transform=ax2.transAxes, ha='center', va='center',
                     fontsize=16, fontweight='bold')
-        
-        self._set_map_bounds(ax2)
+            self._set_map_bounds(ax2)
         ax2.grid(True, alpha=0.3)
         
         # Overall title
@@ -413,9 +426,12 @@ class GAVisualizer:
             if (node1 in self.graph.nodes and node2 in self.graph.nodes and
                 self.graph.has_edge(node1, node2)):
                 
-                # Distance
+                # Distance (handle MultiGraph format)
                 edge_data = self.graph[node1][node2]
-                total_distance += edge_data.get('length', 0.0)
+                if 0 in edge_data:
+                    total_distance += edge_data[0].get('length', 0.0)
+                else:
+                    total_distance += edge_data.get('length', 0.0)
                 
                 # Elevation
                 elev1 = self.graph.nodes[node1].get('elevation', 0.0)
@@ -428,8 +444,42 @@ class GAVisualizer:
             'elevation_gain_m': total_elevation_gain
         }
     
-    def _set_map_bounds(self, ax) -> None:
-        """Set axis bounds to graph extent"""
+    def _set_map_bounds(self, ax, routes=None) -> None:
+        """Set axis bounds to route extent or graph extent"""
+        if routes:
+            # Calculate bounds based on actual routes
+            all_lats = []
+            all_lons = []
+            
+            for route in routes:
+                if hasattr(route, 'segments'):
+                    for segment in route.segments:
+                        for node in segment.path_nodes:
+                            if node in self.graph.nodes:
+                                all_lats.append(self.graph.nodes[node]['y'])
+                                all_lons.append(self.graph.nodes[node]['x'])
+                elif isinstance(route, list):  # TSP route as node list
+                    for node in route:
+                        if node in self.graph.nodes:
+                            all_lats.append(self.graph.nodes[node]['y'])
+                            all_lons.append(self.graph.nodes[node]['x'])
+            
+            if all_lats and all_lons:
+                min_lat, max_lat = min(all_lats), max(all_lats)
+                min_lon, max_lon = min(all_lons), max(all_lons)
+                
+                # Add margin based on route extent
+                lat_range = max_lat - min_lat
+                lon_range = max_lon - min_lon
+                margin_lat = max(0.0005, lat_range * 0.1)  # 10% margin, minimum 0.0005
+                margin_lon = max(0.0005, lon_range * 0.1)
+                
+                ax.set_xlim(min_lon - margin_lon, max_lon + margin_lon)
+                ax.set_ylim(min_lat - margin_lat, max_lat + margin_lat)
+                ax.set_aspect('equal')
+                return
+        
+        # Fallback to graph bounds
         margin = 0.001  # Small margin around bounds
         ax.set_xlim(self.bounds['min_lon'] - margin, self.bounds['max_lon'] + margin)
         ax.set_ylim(self.bounds['min_lat'] - margin, self.bounds['max_lat'] + margin)
