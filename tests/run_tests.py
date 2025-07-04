@@ -34,6 +34,19 @@ def check_dependencies():
     return missing_deps
 
 
+def check_ga_dependencies():
+    """Check if GA-specific dependencies are available"""
+    missing_deps = []
+    
+    # Check matplotlib for visualizations
+    try:
+        import matplotlib
+    except ImportError:
+        missing_deps.append('matplotlib')
+    
+    return missing_deps
+
+
 def run_unit_tests():
     """Run unit tests for route services (requires dependencies)"""
     print("🧪 Running Unit Tests (Requires Dependencies)")
@@ -80,6 +93,40 @@ def run_integration_tests():
         return result
     except Exception as e:
         print(f"❌ Failed to run integration tests: {e}")
+        return None
+
+
+def run_ga_tests():
+    """Run GA-specific tests (requires dependencies + matplotlib)"""
+    print("🧬 Running GA Tests (Requires Dependencies)")
+    print("=" * 50)
+    
+    missing_deps = check_dependencies()
+    missing_ga_deps = check_ga_dependencies()
+    all_missing = missing_deps + missing_ga_deps
+    
+    if all_missing:
+        print(f"❌ Missing dependencies: {', '.join(all_missing)}")
+        print("📋 Install with: pip install networkx osmnx numpy matplotlib pandas")
+        return None
+    
+    try:
+        # Discover and run GA tests (specifically test_ga_*.py files)
+        loader = unittest.TestLoader()
+        suite = unittest.TestSuite()
+        
+        # Add GA-specific unit tests
+        unit_dir = os.path.join(os.path.dirname(__file__), 'unit')
+        ga_test_pattern = 'test_ga_*.py'
+        ga_suite = loader.discover(unit_dir, pattern=ga_test_pattern)
+        suite.addTest(ga_suite)
+        
+        runner = unittest.TextTestRunner(verbosity=2, buffer=True)
+        result = runner.run(suite)
+        
+        return result
+    except Exception as e:
+        print(f"❌ Failed to run GA tests: {e}")
         return None
 
 
@@ -172,6 +219,15 @@ def main():
         else:
             all_success = False
     
+    if test_type in ['ga', 'all']:
+        # Run GA tests if dependencies available
+        result = run_ga_tests()
+        if result:
+            success = print_test_summary(result, "GA tests")
+            all_success = all_success and success
+        else:
+            all_success = False
+    
     if test_type in ['integration', 'all']:
         # Run integration tests if dependencies available
         result = run_integration_tests()
@@ -190,10 +246,11 @@ def main():
         else:
             all_success = False
     
-    if test_type not in ['unit', 'integration', 'smoke', 'all']:
-        print("Usage: python run_tests.py [unit|integration|smoke|all]")
+    if test_type not in ['unit', 'ga', 'integration', 'smoke', 'all']:
+        print("Usage: python run_tests.py [unit|ga|integration|smoke|all]")
         print("\nTest types:")
         print("  unit        - Run unit tests (mocked, fast)")
+        print("  ga          - Run GA tests (genetic algorithm components)")
         print("  integration - Run integration tests (mocked)")
         print("  smoke       - Run smoke tests (real dependencies, slower)")
         print("  all         - Run all available tests")

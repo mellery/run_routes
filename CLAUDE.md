@@ -98,6 +98,15 @@ During GA development, **visualizations are mandatory** at key verification poin
 - Save as **PNG images** with descriptive filenames
 - Be generated **automatically** during development phases
 
+### **🧪 CRITICAL: Unit Testing Requirements**
+
+**Unit tests are MANDATORY during GA development.** All GA components must have comprehensive unit test coverage:
+- **Test-Driven Development**: Write tests before implementing features
+- **Coverage requirement**: >90% test coverage for all GA components
+- **Mock dependencies**: Use mocks for external dependencies (matplotlib, file I/O)
+- **Fast execution**: Unit tests must complete in <1 second
+- **Automatic execution**: Tests run via `python tests/run_tests.py ga`
+
 ### **Key Visualization Points:**
 1. **Population Initialization**: Show initial population diversity
 2. **Crossover Operations**: Verify parent combination correctness
@@ -155,17 +164,17 @@ python tests/run_tests.py smoke          # Smoke tests (7 tests, real dependenci
 python -m unittest tests.unit.test_network_manager -v
 python -m unittest tests.integration.test_route_services_integration -v
 
-# === GA TESTING (🚧 IN DEVELOPMENT) ===
-# GA-specific testing with mandatory visualizations
-python tests/run_tests.py ga            # GA unit tests
-python tests/run_tests.py ga_integration # GA integration tests  
-python tests/run_tests.py ga_visual      # GA visualization tests
+# === GA TESTING ===
+# GA-specific unit testing (MANDATORY during development)
+python tests/run_tests.py ga            # GA unit tests (85+ tests)
+python tests/run_tests.py all           # All tests including GA
 
 # Individual GA test files
+python -m unittest tests.unit.test_ga_chromosome -v      # Chromosome classes
+python -m unittest tests.unit.test_ga_population -v      # Population initialization
+python -m unittest tests.unit.test_ga_visualizer -v      # Visualization components
 python -m unittest tests.unit.test_genetic_optimizer -v  # 🚧 IN DEVELOPMENT
-python -m unittest tests.unit.test_ga_chromosome -v      # 🚧 IN DEVELOPMENT
 python -m unittest tests.unit.test_ga_operators -v       # 🚧 IN DEVELOPMENT
-python -m unittest tests.visual.test_ga_visualizer -v    # 🚧 IN DEVELOPMENT
 
 # GA Development Testing with Visualizations
 python tests/ga_development_test.py --phase initialization --save-images
@@ -293,6 +302,9 @@ source venv/bin/activate && pip install <package_name>
 # Implement core classes
 python -c "from ga_chromosome import RouteChromosome, RouteSegment; print('Classes implemented')"
 
+# MANDATORY: Run unit tests during development
+python tests/run_tests.py ga             # Must pass before proceeding
+
 # Test chromosome creation with visualization
 python ga_development_test.py --phase chromosome --save-images
 python ga_visualizer.py --test-chromosome --save chromosome_test.png
@@ -303,6 +315,9 @@ python ga_development_test.py --phase initialization --save-images
 
 ### **Phase 2: Genetic Operators (Week 2)**
 ```bash
+# MANDATORY: Unit tests for genetic operators
+python -m unittest tests.unit.test_ga_operators -v
+
 # Test crossover operators with before/after visualization
 python ga_development_test.py --phase crossover --save-images
 python ga_visualizer.py --test-crossover --save crossover_results.png
@@ -317,6 +332,9 @@ python ga_development_test.py --phase selection --save-images
 
 ### **Phase 3: Evolution & Optimization (Week 3)**
 ```bash
+# MANDATORY: Unit tests for complete genetic optimizer
+python -m unittest tests.unit.test_genetic_optimizer -v
+
 # Full evolution test with generation-by-generation visualization
 python ga_development_test.py --phase evolution --generations 50 --save-images
 python ga_visualizer.py --evolution-gif --save evolution_50gen.gif
@@ -365,9 +383,11 @@ ga_dev_comparison_tsp_vs_ga_elevation_20241204_143200.png
 ```
 
 ### **Quality Gates:**
-Each phase requires **visual verification** before proceeding:
-1. **Chromosome validity**: All routes must be connected and return to start
-2. **Operator correctness**: Crossover/mutation must preserve route validity
-3. **Evolution progress**: Fitness must improve over generations
-4. **Objective optimization**: GA must exceed TSP for elevation objectives
-5. **Performance acceptance**: GA runtime must be reasonable (<60s for 5km routes)
+Each phase requires **visual verification AND unit test coverage** before proceeding:
+1. **Unit Test Coverage**: >90% test coverage for all GA components
+2. **Test Execution**: All unit tests must pass (python tests/run_tests.py ga)
+3. **Chromosome validity**: All routes must be connected and return to start
+4. **Operator correctness**: Crossover/mutation must preserve route validity
+5. **Evolution progress**: Fitness must improve over generations
+6. **Objective optimization**: GA must exceed TSP for elevation objectives
+7. **Performance acceptance**: GA runtime must be reasonable (<120s for 5km routes)
