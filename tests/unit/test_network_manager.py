@@ -168,7 +168,7 @@ class TestNetworkManager(unittest.TestCase):
     def test_default_constants(self):
         """Test default constants"""
         self.assertEqual(NetworkManager.DEFAULT_CENTER_POINT, (37.1299, -80.4094))
-        self.assertEqual(NetworkManager.DEFAULT_RADIUS_KM, 0.8)
+        self.assertEqual(NetworkManager.DEFAULT_RADIUS_KM, 5.0)
         self.assertEqual(NetworkManager.DEFAULT_NETWORK_TYPE, 'all')
 
 
