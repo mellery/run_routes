@@ -329,6 +329,8 @@ class FastDistanceConstrainedTSP(FastTSPSolver):
         
         # Use nearest neighbor algorithm (default or fallback)
         solver = FastNearestNeighborTSP(self.graph, self.start_node, self.objective)
+        # Pass the filtered candidates to avoid using all nodes
+        solver.candidate_nodes = candidate_nodes
         
         # Try different subset sizes to find a route within distance constraints
         best_route = None
@@ -393,6 +395,8 @@ class FastDistanceConstrainedTSP(FastTSPSolver):
             # With full intersection set and higher limits, we can try more combinations
             fallback_max_nodes = min(40, max(10, int(self.target_distance_km * 6)))
             solver = FastNearestNeighborTSP(self.graph, self.start_node, self.objective)
+            # Pass the filtered candidates to avoid using all nodes in fallback
+            solver.candidate_nodes = candidate_nodes
             
             for num_nodes in range(5, fallback_max_nodes):
                 try:

@@ -180,7 +180,7 @@ class RefactoredCLIRoutePlanner:
             start_node: Starting node ID
             target_distance: Target distance in km
             objective: Route objective
-            algorithm: Algorithm to use
+            algorithm: Algorithm to use ('nearest_neighbor', 'genetic', 'unconstrained')
             
         Returns:
             Route result dictionary or None
@@ -188,6 +188,10 @@ class RefactoredCLIRoutePlanner:
         if not self.services:
             print("❌ Services not initialized")
             return None
+        
+        # Handle unconstrained algorithm separately
+        if algorithm == "unconstrained":
+            return self._generate_unconstrained_route(start_node, target_distance)
         
         route_optimizer = self.services['route_optimizer']
         
@@ -214,6 +218,165 @@ class RefactoredCLIRoutePlanner:
             print(f"✅ Route generated in {solve_time:.2f} seconds")
         
         return result
+    
+    def _generate_unconstrained_route(self, start_node, target_distance):
+        """Generate route using unconstrained TSP approach
+        
+        Args:
+            start_node: Starting node ID
+            target_distance: Target distance in km
+            
+        Returns:
+            Route result dictionary or None
+        """
+        print(f"\n🚀 Generating unconstrained TSP route...")
+        print(f"   Start: Node {start_node}")
+        print(f"   Target distance: {target_distance:.1f}km")
+        print(f"   Algorithm: unconstrained (shortest-path distances)")
+        
+        try:
+            # Import the unconstrained solver
+            import sys
+            import os
+            sys.path.append(os.path.dirname(__file__))
+            from quick_unconstrained_tsp import QuickUnconstrainedTSP
+            
+            # Get filtered candidates using existing logic
+            route_optimizer = self.services['route_optimizer']
+            candidate_nodes = route_optimizer._get_intersection_nodes()
+            
+            # Apply distance filtering
+            max_straight_line_km = (target_distance / 2.0) + 1.5
+            straight_line_filtered = route_optimizer._filter_nodes_by_distance(
+                candidate_nodes, start_node, max_straight_line_km
+            )
+            max_road_distance_km = (target_distance / 2.0) + 1.0
+            filtered_candidates = route_optimizer._filter_nodes_by_road_distance(
+                straight_line_filtered, start_node, max_road_distance_km
+            )
+            
+            if start_node not in filtered_candidates:
+                filtered_candidates.append(start_node)
+            
+            print(f"   Candidates: {len(filtered_candidates)} filtered nodes")
+            
+            # Create and run unconstrained solver
+            graph = self.services['route_optimizer'].graph
+            solver = QuickUnconstrainedTSP(graph, filtered_candidates)
+            
+            # Try both greedy methods
+            tolerance = 0.12  # ±12% tolerance
+            result = solver.greedy_distance_aware(start_node, target_distance, tolerance=tolerance)
+            
+            if not result or not result.get('valid'):
+                print(f"   Trying enhanced method...")
+                result = solver.enhanced_greedy(start_node, target_distance, tolerance=tolerance)
+            
+            if result:
+                # Convert to format expected by CLI
+                solve_time = result.get('search_time', 0)
+                print(f"✅ Unconstrained route generated in {solve_time:.2f} seconds")
+                
+                # Convert to CLI format
+                cli_result = {
+                    'route': result['route'],
+                    'distance_km': result['distance_km'],
+                    'total_distance_km': result['distance_km'],
+                    'solver_info': {
+                        'solve_time': solve_time,
+                        'algorithm': 'unconstrained',
+                        'method': result.get('method', 'unconstrained'),
+                        'routes_tested': result.get('routes_tested', 0)
+                    },
+                    'valid': result.get('valid', False),
+                    'stats': {
+                        'total_distance_km': result['distance_km'],
+                        'distance_km': result['distance_km'],
+                        'num_nodes': len(result['route']),
+                        'total_elevation_gain_m': 0,  # Will be calculated by analyzer
+                        'total_elevation_loss_m': 0,  # Will be calculated by analyzer
+                        'net_elevation_gain_m': 0,   # Will be calculated by analyzer
+                        'max_grade_percent': 0,      # Will be calculated by analyzer
+                        'estimated_time_min': 0      # Will be calculated by analyzer
+                    }
+                }
+                
+                # Calculate proper elevation statistics using route analyzer
+                print(f"   Calculating elevation profile...")
+                try:
+                    route_analyzer = self.services['route_analyzer']
+                    analysis = route_analyzer.analyze_route(cli_result)
+                    
+                    # Calculate elevation manually since analyzer format differs
+                    route_nodes = result['route']
+                    elevations = []
+                    for node in route_nodes:
+                        if node in graph.nodes:
+                            elevation = graph.nodes[node].get('elevation', 0)
+                            elevations.append(elevation)
+                    
+                    if elevations:
+                        # Calculate gains and losses
+                        total_gain = 0
+                        total_loss = 0
+                        
+                        # Go through route segments
+                        for i in range(len(elevations) - 1):
+                            diff = elevations[i+1] - elevations[i]
+                            if diff > 0:
+                                total_gain += diff
+                            else:
+                                total_loss += abs(diff)
+                        
+                        # Add return to start
+                        return_diff = elevations[0] - elevations[-1]
+                        if return_diff > 0:
+                            total_gain += return_diff
+                        else:
+                            total_loss += abs(return_diff)
+                        
+                        # Estimate time (assume 6 min/km base + 30 sec per 10m elevation gain)
+                        base_time = result['distance_km'] * 6  # 6 min/km
+                        elevation_penalty = total_gain * 0.5  # 30 sec per 10m = 0.5 min per 10m
+                        estimated_time = base_time + elevation_penalty
+                        
+                        # Calculate max grade (simplified)
+                        max_grade = 0
+                        if len(elevations) > 1:
+                            for i in range(len(elevations) - 1):
+                                # This is simplified - real grade needs distance between nodes
+                                elev_diff = abs(elevations[i+1] - elevations[i])
+                                # Assume ~500m between major intersections for grade calc
+                                grade = (elev_diff / 500) * 100
+                                max_grade = max(max_grade, grade)
+                        
+                        # Update stats with calculated elevation data
+                        cli_result['stats'].update({
+                            'total_elevation_gain_m': total_gain,
+                            'total_elevation_loss_m': total_loss,
+                            'net_elevation_gain_m': total_gain - total_loss,
+                            'max_grade_percent': max_grade,
+                            'estimated_time_min': estimated_time
+                        })
+                        
+                        print(f"   ✅ Elevation analysis: +{total_gain:.0f}m gain, -{total_loss:.0f}m loss")
+                    else:
+                        print(f"   ⚠️ No elevation data available")
+                    
+                except Exception as e:
+                    print(f"   ⚠️ Elevation analysis failed: {e}")
+                
+                return cli_result
+            else:
+                print(f"❌ Unconstrained solver failed to find route")
+                return None
+                
+        except ImportError as e:
+            print(f"❌ Unconstrained solver not available: {e}")
+            return None
+        except Exception as e:
+            print(f"❌ Error in unconstrained solver: {e}")
+            return None
     
     def display_route_stats(self, route_result):
         """Display route statistics using formatter
@@ -670,9 +833,18 @@ def interactive_mode():
                         objective = obj_list[0][1]  # Default
                     
                     # Get algorithm
-                    algorithms = route_optimizer.get_available_algorithms()
-                    algorithm_input = input(f"Algorithm ({'/'.join(algorithms)}) [nearest_neighbor]: ").strip()
-                    algorithm = algorithm_input if algorithm_input in algorithms else "nearest_neighbor"
+                    print("\nAlgorithm options:")
+                    print("1. nearest_neighbor (standard TSP)")
+                    print("2. genetic (genetic algorithm)")
+                    print("3. unconstrained (shortest-path distances, no road-adjacent constraints)")
+                    
+                    algo_input = input("Select algorithm (1-3) [1]: ").strip()
+                    try:
+                        algo_choice = int(algo_input) if algo_input else 1
+                        algo_map = {1: "nearest_neighbor", 2: "genetic", 3: "unconstrained"}
+                        algorithm = algo_map.get(algo_choice, "nearest_neighbor")
+                    except ValueError:
+                        algorithm = "nearest_neighbor"
                     
                     # Generate route
                     result = planner.generate_route(start_node, target_distance, objective, algorithm)
@@ -760,6 +932,13 @@ def main():
         help='Route objective'
     )
     
+    parser.add_argument(
+        '--algorithm', '-a',
+        choices=['nearest_neighbor', 'genetic', 'unconstrained'],
+        default='nearest_neighbor',
+        help='Algorithm to use (unconstrained = shortest-path distances, no road-adjacent constraints)'
+    )
+    
     args = parser.parse_args()
     
     if args.interactive or (not args.start_node and not args.distance):
@@ -783,7 +962,7 @@ def main():
         
         result = planner.generate_route(
             args.start_node, args.distance, 
-            obj_map[args.objective]
+            obj_map[args.objective], args.algorithm
         )
         
         if result:

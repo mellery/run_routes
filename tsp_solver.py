@@ -35,63 +35,352 @@ class TSPSolver:
         self._build_distance_matrix()
         
     def _build_distance_matrix(self):
-        """Build distance matrices for different objectives"""
+        """Build distance matrices using spatial filtering + approximation + caching for major speedup"""
         print(f"  Building distance matrix for {len(self.nodes)} nodes...")
-        print(f"  This may take a moment for large networks...")
+        print(f"  Using spatial filtering + distance approximation + caching...")
         
+        # Initialize cache system
+        from distance_cache import DistanceMatrixCache
+        cache = DistanceMatrixCache()
+        
+        # Try to load from cache first
+        cached_matrices = cache.load_distance_matrix(self.nodes, self.objective, self.graph)
+        
+        if cached_matrices:
+            # Cache hit - use cached matrices
+            self.distance_matrix, self.elevation_matrix, self.running_weight_matrix = cached_matrices
+            print(f"  ⚡ Using cached distance matrix - instant load!")
+            return
+        
+        # Cache miss - compute matrices
+        print(f"  💾 Cache miss - computing new distance matrix...")
         self.distance_matrix = {}
         self.elevation_matrix = {}
         self.running_weight_matrix = {}
         
-        total_pairs = len(self.nodes)
-        processed = 0
-        
+        # Initialize matrices
         for u in self.nodes:
             self.distance_matrix[u] = {}
             self.elevation_matrix[u] = {}
             self.running_weight_matrix[u] = {}
+            for v in self.nodes:
+                self.distance_matrix[u][v] = float('inf') if u != v else 0
+                self.elevation_matrix[u][v] = 0
+                self.running_weight_matrix[u][v] = float('inf') if u != v else 0
+        
+        # Pre-compute haversine distances for spatial filtering
+        print(f"  Computing haversine distance matrix...")
+        haversine_matrix = self._compute_haversine_matrix()
+        
+        # Define thresholds
+        exact_computation_threshold_m = 5000  # 5km - compute exact road distance
+        road_factor = 1.4  # Typical road distance multiplier over straight-line
+        
+        # Count computations for progress tracking
+        total_pairs = len(self.nodes) * (len(self.nodes) - 1)
+        exact_computations = 0
+        approximated_pairs = 0
+        
+        # Analyze spatial distribution
+        nearby_pairs = sum(1 for i, u in enumerate(self.nodes) for j, v in enumerate(self.nodes[i+1:], i+1)
+                          if haversine_matrix[u][v] <= exact_computation_threshold_m)
+        print(f"  Spatial analysis: {nearby_pairs*2:,} pairs within {exact_computation_threshold_m/1000:.0f}km (exact computation)")
+        print(f"  Remaining {total_pairs - nearby_pairs*2:,} pairs will use approximation")
+        
+        # Build distance matrix with spatial filtering using multi-threading
+        total_nodes = len(self.nodes)
+        processed = 0
+        
+        # Determine optimal thread count
+        import multiprocessing as mp
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        import threading
+        
+        max_workers = min(mp.cpu_count(), max(2, total_nodes // 10))  # Don't over-thread
+        use_multithreading = total_nodes >= 20  # Only use threading for larger matrices
+        
+        if use_multithreading:
+            print(f"  Using {max_workers} threads for parallel computation...")
             
-            # Progress indicator
-            processed += 1
-            if processed % 50 == 0 or processed == total_pairs:
-                progress = (processed / total_pairs) * 100
-                print(f"  Matrix calculation: {processed}/{total_pairs} nodes ({progress:.0f}%)")
+            # Thread-safe progress tracking
+            progress_lock = threading.Lock()
+            progress_counter = {'exact': 0, 'approx': 0, 'processed': 0}
+            
+            def process_source_node(source_node):
+                """Process distance computation for one source node"""
+                local_exact = 0
+                local_approx = 0
+                
+                # Separate nearby and distant targets for this source
+                nearby_targets = []
+                distant_targets = []
+                
+                for target_node in self.nodes:
+                    if source_node != target_node:
+                        haversine_dist = haversine_matrix[source_node][target_node]
+                        if haversine_dist <= exact_computation_threshold_m:
+                            nearby_targets.append(target_node)
+                        else:
+                            distant_targets.append(target_node)
+                
+                # Compute exact distances for nearby targets using batch operation
+                if nearby_targets:
+                    try:
+                        # Get all shortest paths from this source
+                        paths_from_source = nx.single_source_shortest_path(
+                            self.graph, source_node, weight='length'
+                        )
+                        
+                        # Process paths to nearby targets
+                        for target_node in nearby_targets:
+                            if target_node in paths_from_source:
+                                path = paths_from_source[target_node]
+                                # Calculate metrics for this path
+                                total_distance = 0
+                                total_elevation_gain = 0
+                                total_running_weight = 0
+                                
+                                for i in range(len(path) - 1):
+                                    edge_data = self.graph.get_edge_data(path[i], path[i+1])
+                                    if edge_data:
+                                        # Handle multi-edges by taking the first edge
+                                        if isinstance(edge_data, dict) and 0 in edge_data:
+                                            edge_data = edge_data[0]
+                                        
+                                        total_distance += edge_data.get('length', 0)
+                                        total_elevation_gain += max(0, edge_data.get('elevation_gain', 0))
+                                        total_running_weight += edge_data.get('running_weight', edge_data.get('length', 0))
+                                
+                                # Store exact computed values (thread-safe write to different keys)
+                                self.distance_matrix[source_node][target_node] = total_distance
+                                self.elevation_matrix[source_node][target_node] = total_elevation_gain
+                                self.running_weight_matrix[source_node][target_node] = total_running_weight
+                                local_exact += 1
+                            
+                    except Exception:
+                        # Fallback: compute individually for nearby targets
+                        for target_node in nearby_targets:
+                            try:
+                                path = nx.shortest_path(self.graph, source_node, target_node, weight='length')
+                                
+                                total_distance = 0
+                                total_elevation_gain = 0
+                                total_running_weight = 0
+                                
+                                for i in range(len(path) - 1):
+                                    edge_data = self.graph.get_edge_data(path[i], path[i+1])
+                                    if edge_data:
+                                        if isinstance(edge_data, dict) and 0 in edge_data:
+                                            edge_data = edge_data[0]
+                                        
+                                        total_distance += edge_data.get('length', 0)
+                                        total_elevation_gain += max(0, edge_data.get('elevation_gain', 0))
+                                        total_running_weight += edge_data.get('running_weight', edge_data.get('length', 0))
+                                
+                                self.distance_matrix[source_node][target_node] = total_distance
+                                self.elevation_matrix[source_node][target_node] = total_elevation_gain
+                                self.running_weight_matrix[source_node][target_node] = total_running_weight
+                                local_exact += 1
+                                
+                            except nx.NetworkXNoPath:
+                                # Keep infinite values
+                                pass
+                
+                # Use approximation for distant targets
+                for target_node in distant_targets:
+                    haversine_dist = haversine_matrix[source_node][target_node]
+                    
+                    # Approximate road distance = haversine × road factor
+                    approx_road_distance = haversine_dist * road_factor
+                    
+                    # Store approximated values (thread-safe write to different keys)
+                    self.distance_matrix[source_node][target_node] = approx_road_distance
+                    self.elevation_matrix[source_node][target_node] = 0
+                    self.running_weight_matrix[source_node][target_node] = approx_road_distance
+                    local_approx += 1
+                
+                # Thread-safe progress update
+                with progress_lock:
+                    progress_counter['exact'] += local_exact
+                    progress_counter['approx'] += local_approx
+                    progress_counter['processed'] += 1
+                    
+                    if progress_counter['processed'] % max(1, max_workers) == 0:
+                        progress = (progress_counter['processed'] / total_nodes) * 100
+                        print(f"  Parallel processing: {progress_counter['processed']}/{total_nodes} sources ({progress:.0f}%) - "
+                              f"{progress_counter['exact']:,} exact, {progress_counter['approx']:,} approx")
+                
+                return local_exact, local_approx
+            
+            # Execute parallel computation
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                # Submit all source nodes for processing
+                future_to_node = {executor.submit(process_source_node, node): node for node in self.nodes}
+                
+                # Wait for completion and collect results
+                for future in as_completed(future_to_node):
+                    try:
+                        local_exact, local_approx = future.result()
+                    except Exception as e:
+                        source_node = future_to_node[future]
+                        print(f"  ⚠️ Thread error for node {source_node}: {e}")
+            
+            # Get final counts from thread-safe counter
+            exact_computations = progress_counter['exact']
+            approximated_pairs = progress_counter['approx']
+            
+        else:
+            # Single-threaded fallback for small matrices
+            print(f"  Using single-threaded computation (small matrix)...")
+            exact_computations = 0
+            approximated_pairs = 0
+            
+            for source_node in self.nodes:
+                # Progress indicator
+                processed += 1
+                if processed % 10 == 0 or processed == total_nodes:
+                    progress = (processed / total_nodes) * 100
+                    print(f"  Single-thread processing: {processed}/{total_nodes} sources ({progress:.0f}%) - {exact_computations:,} exact, {approximated_pairs:,} approx")
+                
+                # Separate nearby and distant targets for this source
+                nearby_targets = []
+                distant_targets = []
+                
+                for target_node in self.nodes:
+                    if source_node != target_node:
+                        haversine_dist = haversine_matrix[source_node][target_node]
+                        if haversine_dist <= exact_computation_threshold_m:
+                            nearby_targets.append(target_node)
+                        else:
+                            distant_targets.append(target_node)
+                
+                # Compute exact distances for nearby targets using batch operation
+                if nearby_targets:
+                    try:
+                        # Get all shortest paths from this source
+                        paths_from_source = nx.single_source_shortest_path(
+                            self.graph, source_node, weight='length'
+                        )
+                        
+                        # Process paths to nearby targets
+                        for target_node in nearby_targets:
+                            if target_node in paths_from_source:
+                                path = paths_from_source[target_node]
+                                # Calculate metrics for this path
+                                total_distance = 0
+                                total_elevation_gain = 0
+                                total_running_weight = 0
+                                
+                                for i in range(len(path) - 1):
+                                    edge_data = self.graph.get_edge_data(path[i], path[i+1])
+                                    if edge_data:
+                                        # Handle multi-edges by taking the first edge
+                                        if isinstance(edge_data, dict) and 0 in edge_data:
+                                            edge_data = edge_data[0]
+                                        
+                                        total_distance += edge_data.get('length', 0)
+                                        total_elevation_gain += max(0, edge_data.get('elevation_gain', 0))
+                                        total_running_weight += edge_data.get('running_weight', edge_data.get('length', 0))
+                                
+                                # Store exact computed values
+                                self.distance_matrix[source_node][target_node] = total_distance
+                                self.elevation_matrix[source_node][target_node] = total_elevation_gain
+                                self.running_weight_matrix[source_node][target_node] = total_running_weight
+                                exact_computations += 1
+                                
+                    except Exception:
+                        # Fallback: compute individually for nearby targets
+                        for target_node in nearby_targets:
+                            try:
+                                path = nx.shortest_path(self.graph, source_node, target_node, weight='length')
+                                
+                                total_distance = 0
+                                total_elevation_gain = 0
+                                total_running_weight = 0
+                                
+                                for i in range(len(path) - 1):
+                                    edge_data = self.graph.get_edge_data(path[i], path[i+1])
+                                    if edge_data:
+                                        if isinstance(edge_data, dict) and 0 in edge_data:
+                                            edge_data = edge_data[0]
+                                        
+                                        total_distance += edge_data.get('length', 0)
+                                        total_elevation_gain += max(0, edge_data.get('elevation_gain', 0))
+                                        total_running_weight += edge_data.get('running_weight', edge_data.get('length', 0))
+                                
+                                self.distance_matrix[source_node][target_node] = total_distance
+                                self.elevation_matrix[source_node][target_node] = total_elevation_gain
+                                self.running_weight_matrix[source_node][target_node] = total_running_weight
+                                exact_computations += 1
+                                
+                            except nx.NetworkXNoPath:
+                                # Keep infinite values
+                                pass
+                
+                # Use approximation for distant targets
+                for target_node in distant_targets:
+                    haversine_dist = haversine_matrix[source_node][target_node]
+                    
+                    # Approximate road distance = haversine × road factor
+                    approx_road_distance = haversine_dist * road_factor
+                    
+                    # Store approximated values
+                    self.distance_matrix[source_node][target_node] = approx_road_distance
+                    self.elevation_matrix[source_node][target_node] = 0  # Distant nodes likely minimal elevation impact
+                    self.running_weight_matrix[source_node][target_node] = approx_road_distance
+                    approximated_pairs += 1
+        
+        # Summary statistics
+        computation_reduction = (approximated_pairs / total_pairs) * 100 if total_pairs > 0 else 0
+        print(f"  Matrix completed: {exact_computations:,} exact + {approximated_pairs:,} approximated")
+        print(f"  Computation reduction: {computation_reduction:.1f}% of pairs approximated")
+        print(f"  Speedup estimate: {total_pairs / max(exact_computations, 1):.1f}x faster")
+        
+        # Save computed matrices to cache for future use
+        try:
+            cache_key = cache.save_distance_matrix(
+                self.nodes, self.objective, self.graph,
+                self.distance_matrix, self.elevation_matrix, self.running_weight_matrix
+            )
+            if cache_key:
+                print(f"  💾 Distance matrix cached for future use")
+        except Exception as e:
+            print(f"  ⚠️ Cache save failed: {e}")
+    
+    def _compute_haversine_matrix(self):
+        """Compute haversine distance matrix for spatial filtering"""
+        import math
+        
+        haversine_matrix = {}
+        
+        # Get coordinates for all nodes
+        node_coords = {}
+        for node in self.nodes:
+            node_data = self.graph.nodes[node]
+            node_coords[node] = (node_data['y'], node_data['x'])  # lat, lon
+        
+        # Compute haversine distances
+        for u in self.nodes:
+            haversine_matrix[u] = {}
+            lat1, lon1 = node_coords[u]
             
             for v in self.nodes:
                 if u == v:
-                    self.distance_matrix[u][v] = 0
-                    self.elevation_matrix[u][v] = 0
-                    self.running_weight_matrix[u][v] = 0
+                    haversine_matrix[u][v] = 0
                 else:
-                    # Use shortest path if not directly connected
-                    try:
-                        path = nx.shortest_path(self.graph, u, v, weight='length')
-                        
-                        # Calculate total distance
-                        total_distance = 0
-                        total_elevation_gain = 0
-                        total_running_weight = 0
-                        
-                        for i in range(len(path) - 1):
-                            edge_data = self.graph.get_edge_data(path[i], path[i+1])
-                            if edge_data:
-                                # Handle multi-edges by taking the first edge
-                                if isinstance(edge_data, dict) and 0 in edge_data:
-                                    edge_data = edge_data[0]
-                                
-                                total_distance += edge_data.get('length', float('inf'))
-                                total_elevation_gain += max(0, edge_data.get('elevation_gain', 0))
-                                total_running_weight += edge_data.get('running_weight', edge_data.get('length', float('inf')))
-                        
-                        self.distance_matrix[u][v] = total_distance
-                        self.elevation_matrix[u][v] = total_elevation_gain
-                        self.running_weight_matrix[u][v] = total_running_weight
-                        
-                    except nx.NetworkXNoPath:
-                        # No path between nodes
-                        self.distance_matrix[u][v] = float('inf')
-                        self.elevation_matrix[u][v] = 0
-                        self.running_weight_matrix[u][v] = float('inf')
+                    lat2, lon2 = node_coords[v]
+                    
+                    # Haversine formula
+                    R = 6371000  # Earth radius in meters
+                    dlat = math.radians(lat2 - lat1)
+                    dlon = math.radians(lon2 - lon1)
+                    a = (math.sin(dlat/2)**2 + 
+                         math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * 
+                         math.sin(dlon/2)**2)
+                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+                    haversine_matrix[u][v] = R * c
+        
+        return haversine_matrix
     
     def get_route_cost(self, route: List[int]) -> float:
         """Calculate cost of a route based on the objective"""
