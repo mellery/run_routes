@@ -6,6 +6,7 @@ Creates OpenStreetMap-based visualizations for GA development and debugging
 
 import os
 import time
+import math
 from datetime import datetime
 from typing import List, Optional, Dict, Any, Tuple
 import matplotlib.pyplot as plt
@@ -100,11 +101,14 @@ class GAVisualizer:
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 10))
         
-        # Plot network background (light gray)
-        self._plot_network_background(ax)
+        # Plot network background with optional OSM
+        routes = [chromosome] if chromosome.segments else None
+        print(f"   📍 Creating visualization with OpenStreetMap background...")
+        use_mercator = self._plot_network_background(ax, routes=routes, use_osm=True)
         
-        # Plot chromosome route
-        self._plot_chromosome_route(ax, chromosome, show_elevation, show_segments)
+        # Plot chromosome route (with coordinate system matching background)
+        self._plot_chromosome_route(ax, chromosome, show_elevation, show_segments, 
+                                   use_mercator=use_mercator)
         
         # Set title with statistics if requested
         if show_stats and chromosome.segments:
@@ -119,10 +123,11 @@ class GAVisualizer:
         
         ax.set_title(title_text, fontsize=14, fontweight='bold', pad=20)
         
-        # Set bounds and labels
-        self._set_map_bounds(ax, [chromosome] if chromosome.segments else None)
-        ax.set_xlabel('Longitude', fontsize=12)
-        ax.set_ylabel('Latitude', fontsize=12)
+        # Set bounds and labels (already set by _plot_network_background if using OSM)
+        if not use_mercator:
+            self._set_map_bounds(ax, [chromosome] if chromosome.segments else None)
+            ax.set_xlabel('Longitude', fontsize=12)
+            ax.set_ylabel('Latitude', fontsize=12)
         
         # Add legend if showing elevation
         if show_elevation and chromosome.segments:
@@ -179,12 +184,12 @@ class GAVisualizer:
         # Statistics table
         ax_stats = plt.subplot2grid((3, 3), (2, 0), colspan=3)
         
-        # Plot network background
-        self._plot_network_background(ax_main)
-        
-        # Plot population routes (sample if too many)
+        # Plot network background with optional OSM
         routes_to_plot = population[:max_routes] if len(population) > max_routes else population
+        print(f"   📍 Creating population visualization with OpenStreetMap background...")
+        use_mercator = self._plot_network_background(ax_main, routes=routes_to_plot, use_osm=True)
         
+        # Plot population routes
         for i, chromosome in enumerate(routes_to_plot):
             if chromosome.segments:
                 color = self.route_colors[i % len(self.route_colors)]
@@ -196,7 +201,8 @@ class GAVisualizer:
                     show_segments=False,
                     route_color=color,
                     alpha=alpha,
-                    linewidth=3 if i == 0 else 2
+                    linewidth=3 if i == 0 else 2,
+                    use_mercator=use_mercator
                 )
         
         # Plot fitness histogram
@@ -234,9 +240,13 @@ class GAVisualizer:
         # Set main plot properties
         ax_main.set_title(f'Population Visualization - Generation {generation}', 
                          fontsize=16, fontweight='bold', pad=20)
-        self._set_map_bounds(ax_main, routes_to_plot)
-        ax_main.set_xlabel('Longitude', fontsize=12)
-        ax_main.set_ylabel('Latitude', fontsize=12)
+        
+        # Set bounds and labels (already set by _plot_network_background if using OSM)
+        if not use_mercator:
+            self._set_map_bounds(ax_main, routes_to_plot)
+            ax_main.set_xlabel('Longitude', fontsize=12)
+            ax_main.set_ylabel('Latitude', fontsize=12)
+        
         ax_main.grid(True, alpha=0.3)
         
         # Save
@@ -310,8 +320,114 @@ class GAVisualizer:
         print(f"Saved comparison visualization: {filepath}")
         return filepath
     
-    def _plot_network_background(self, ax) -> None:
-        """Plot network as light background"""
+    def _plot_network_background(self, ax, routes=None, use_osm=True) -> bool:
+        """Plot network background with optional OpenStreetMap basemap
+        
+        Args:
+            ax: Matplotlib axis
+            routes: Routes to determine bounds
+            use_osm: Whether to try using OpenStreetMap background
+            
+        Returns:
+            True if OSM background was used, False if fallback was used
+        """
+        # Try to use OpenStreetMap background
+        if use_osm:
+            try:
+                import contextily as ctx
+                import pyproj
+                
+                # Calculate bounds based on routes or graph
+                if routes:
+                    all_lats, all_lons = self._get_route_coordinates(routes)
+                else:
+                    all_lats = [data['y'] for _, data in self.graph.nodes(data=True)]
+                    all_lons = [data['x'] for _, data in self.graph.nodes(data=True)]
+                
+                if not all_lats or not all_lons:
+                    raise ValueError("No coordinate data available")
+                
+                # Calculate bounds with proper aspect ratio
+                min_lat, max_lat = min(all_lats), max(all_lats)
+                min_lon, max_lon = min(all_lons), max(all_lons)
+                
+                # Add base margin
+                lat_range = max_lat - min_lat
+                lon_range = max_lon - min_lon
+                
+                # Ensure minimum range to avoid tiny bounds
+                min_range = 0.002  # ~200m at this latitude
+                if lat_range < min_range:
+                    lat_center = (min_lat + max_lat) / 2
+                    min_lat = lat_center - min_range / 2
+                    max_lat = lat_center + min_range / 2
+                    lat_range = min_range
+                
+                if lon_range < min_range:
+                    lon_center = (min_lon + max_lon) / 2
+                    min_lon = lon_center - min_range / 2
+                    max_lon = lon_center + min_range / 2
+                    lon_range = min_range
+                
+                # Calculate proper aspect ratio for this latitude
+                # 1 degree longitude ≈ cos(latitude) * 111 km
+                lat_center = (min_lat + max_lat) / 2
+                cos_lat = abs(math.cos(math.radians(lat_center)))
+                
+                # Adjust ranges to maintain square aspect ratio in projected coordinates
+                if lat_range * cos_lat > lon_range:
+                    # Latitude range is larger, expand longitude
+                    target_lon_range = lat_range * cos_lat
+                    lon_expansion = (target_lon_range - lon_range) / 2
+                    min_lon -= lon_expansion
+                    max_lon += lon_expansion
+                else:
+                    # Longitude range is larger, expand latitude
+                    target_lat_range = lon_range / cos_lat
+                    lat_expansion = (target_lat_range - lat_range) / 2
+                    min_lat -= lat_expansion
+                    max_lat += lat_expansion
+                
+                # Add final margin
+                margin_factor = 0.1
+                lat_margin = (max_lat - min_lat) * margin_factor
+                lon_margin = (max_lon - min_lon) * margin_factor
+                
+                bounds = [
+                    min_lon - lon_margin,  # west
+                    max_lon + lon_margin,  # east
+                    min_lat - lat_margin,  # south
+                    max_lat + lat_margin   # north
+                ]
+                
+                # Transform to Web Mercator
+                transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+                west_merc, south_merc = transformer.transform(bounds[0], bounds[2])
+                east_merc, north_merc = transformer.transform(bounds[1], bounds[3])
+                
+                # Set mercator bounds
+                ax.set_xlim(west_merc, east_merc)
+                ax.set_ylim(south_merc, north_merc)
+                
+                # Add OpenStreetMap basemap
+                ctx.add_basemap(ax, crs="EPSG:3857", source=ctx.providers.OpenStreetMap.Mapnik, alpha=0.7)
+                
+                # Update axis labels and maintain aspect ratio
+                ax.set_xlabel('Easting (m)')
+                ax.set_ylabel('Northing (m)')
+                ax.set_aspect('equal')
+                
+                return True
+                
+            except (ImportError, Exception) as e:
+                print(f"   ⚠️ OSM basemap failed ({str(e)[:50]}), using network background...")
+        
+        # Fallback to network plot
+        self._plot_network_background_fallback(ax)
+        return False
+    
+    def _plot_network_background_fallback(self, ax) -> None:
+        """Plot network as light background (fallback when OSM unavailable)"""
         # Plot edges
         for edge in self.graph.edges():
             node1, node2 = edge
@@ -324,15 +440,47 @@ class GAVisualizer:
         node_y = [data['y'] for _, data in self.graph.nodes(data=True)]
         ax.scatter(node_x, node_y, c='lightgray', s=1, alpha=0.5)
     
+    def _get_route_coordinates(self, routes) -> Tuple[List[float], List[float]]:
+        """Extract all coordinates from routes for bounds calculation"""
+        all_lats = []
+        all_lons = []
+        
+        for route in routes:
+            if hasattr(route, 'segments'):
+                # RouteChromosome
+                for segment in route.segments:
+                    for node in segment.path_nodes:
+                        if node in self.graph.nodes:
+                            all_lats.append(self.graph.nodes[node]['y'])
+                            all_lons.append(self.graph.nodes[node]['x'])
+            elif isinstance(route, list):
+                # Node list (TSP route)
+                for node in route:
+                    if node in self.graph.nodes:
+                        all_lats.append(self.graph.nodes[node]['y'])
+                        all_lons.append(self.graph.nodes[node]['x'])
+        
+        return all_lats, all_lons
+    
     def _plot_chromosome_route(self, ax, chromosome: RouteChromosome,
                              show_elevation: bool = True,
                              show_segments: bool = True,
                              route_color: Optional[str] = None,
                              alpha: float = 0.8,
-                             linewidth: float = 3) -> None:
+                             linewidth: float = 3,
+                             use_mercator: bool = False) -> None:
         """Plot chromosome route on axis"""
         if not chromosome.segments:
             return
+        
+        # Initialize coordinate transformer if needed
+        transformer = None
+        if use_mercator:
+            try:
+                import pyproj
+                transformer = pyproj.Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
+            except ImportError:
+                use_mercator = False
         
         # Plot each segment
         for i, segment in enumerate(chromosome.segments):
@@ -342,10 +490,22 @@ class GAVisualizer:
             # Get coordinates for segment path
             x_coords = []
             y_coords = []
+            elevations = []
+            
             for node in segment.path_nodes:
                 if node in self.graph.nodes:
-                    x_coords.append(self.graph.nodes[node]['x'])
-                    y_coords.append(self.graph.nodes[node]['y'])
+                    lon = self.graph.nodes[node]['x']
+                    lat = self.graph.nodes[node]['y']
+                    
+                    if use_mercator and transformer:
+                        x_merc, y_merc = transformer.transform(lon, lat)
+                        x_coords.append(x_merc)
+                        y_coords.append(y_merc)
+                    else:
+                        x_coords.append(lon)
+                        y_coords.append(lat)
+                    
+                    elevations.append(self.graph.nodes[node].get('elevation', 0))
             
             if len(x_coords) < 2:
                 continue
@@ -372,8 +532,14 @@ class GAVisualizer:
             
             # Mark segment boundaries if requested
             if show_segments and len(chromosome.segments) > 1:
-                start_x = self.graph.nodes[segment.start_node]['x']
-                start_y = self.graph.nodes[segment.start_node]['y']
+                start_lon = self.graph.nodes[segment.start_node]['x']
+                start_lat = self.graph.nodes[segment.start_node]['y']
+                
+                if use_mercator and transformer:
+                    start_x, start_y = transformer.transform(start_lon, start_lat)
+                else:
+                    start_x, start_y = start_lon, start_lat
+                
                 ax.scatter(start_x, start_y, c='yellow', s=30, 
                           zorder=15, edgecolors='black', linewidth=1)
         
@@ -382,14 +548,26 @@ class GAVisualizer:
             start_node = chromosome.segments[0].start_node
             end_node = chromosome.segments[-1].end_node
             
-            start_x = self.graph.nodes[start_node]['x']
-            start_y = self.graph.nodes[start_node]['y']
+            start_lon = self.graph.nodes[start_node]['x']
+            start_lat = self.graph.nodes[start_node]['y']
+            
+            if use_mercator and transformer:
+                start_x, start_y = transformer.transform(start_lon, start_lat)
+            else:
+                start_x, start_y = start_lon, start_lat
+            
             ax.scatter(start_x, start_y, c='green', s=100, marker='o',
                       zorder=20, edgecolors='black', linewidth=2, label='Start')
             
             if start_node != end_node:
-                end_x = self.graph.nodes[end_node]['x']
-                end_y = self.graph.nodes[end_node]['y']
+                end_lon = self.graph.nodes[end_node]['x']
+                end_lat = self.graph.nodes[end_node]['y']
+                
+                if use_mercator and transformer:
+                    end_x, end_y = transformer.transform(end_lon, end_lat)
+                else:
+                    end_x, end_y = end_lon, end_lat
+                
                 ax.scatter(end_x, end_y, c='red', s=100, marker='s',
                           zorder=20, edgecolors='black', linewidth=2, label='End')
     
