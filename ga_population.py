@@ -372,11 +372,15 @@ class PopulationInitializer:
             return self._neighbor_cache[cache_key]
         
         neighbors = []
-        for neighbor in self.graph.neighbors(node):
-            if self.graph.has_edge(node, neighbor):
-                edge_length = self.graph[node][neighbor].get('length', 0.0)
-                if edge_length <= max_distance:
-                    neighbors.append(neighbor)
+        try:
+            for neighbor in self.graph.neighbors(node):
+                if self.graph.has_edge(node, neighbor):
+                    edge_length = self.graph[node][neighbor].get('length', 0.0)
+                    if edge_length <= max_distance:
+                        neighbors.append(neighbor)
+        except Exception:
+            # Node doesn't exist in graph
+            neighbors = []
         
         self._neighbor_cache[cache_key] = neighbors
         return neighbors
