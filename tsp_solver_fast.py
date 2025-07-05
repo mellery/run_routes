@@ -618,11 +618,7 @@ class FastRunningRouteOptimizer:
                           algorithm: str = "nearest_neighbor") -> Dict:
         """Find optimal running route with fast algorithm"""
         
-        print(f"🚀 Finding optimal route (fast algorithm)...")
-        print(f"   Start node: {start_node}")
-        print(f"   Target distance: {target_distance_km:.1f} km")
-        print(f"   Objective: {objective}")
-        print(f"   Algorithm: {algorithm}")
+        print(f"🔧 Using fast TSP solver (no distance matrix precomputation)...")
         
         start_time = time.time()
         

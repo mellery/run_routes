@@ -177,11 +177,7 @@ class OptimizedRunningRouteOptimizer(RunningRouteOptimizer):
                           algorithm: str = "nearest_neighbor") -> Dict:
         """Find optimal running route with progress feedback"""
         
-        print(f"🚀 Finding optimal route...")
-        print(f"   Start node: {start_node}")
-        print(f"   Target distance: {target_distance_km:.1f} km")
-        print(f"   Objective: {objective}")
-        print(f"   Algorithm: {algorithm}")
+        print(f"🔧 Using optimized TSP solver (with progress feedback)...")
         
         # Progress indicator in a separate thread
         progress_messages = []

@@ -199,12 +199,6 @@ class RefactoredCLIRoutePlanner:
         if objective is None:
             objective = route_optimizer.RouteObjective.MINIMIZE_DISTANCE
         
-        print(f"\n🚀 Generating optimized route...")
-        print(f"   Start: Node {start_node}")
-        print(f"   Target distance: {target_distance:.1f}km")
-        print(f"   Algorithm: {algorithm}")
-        print(f"   Solver: {route_optimizer.solver_type}")
-        
         # Generate route
         result = route_optimizer.optimize_route(
             start_node=start_node,
@@ -230,7 +224,7 @@ class RefactoredCLIRoutePlanner:
             Route result dictionary or None
         """
         print(f"\n🚀 Generating unconstrained TSP route...")
-        print(f"   Start: Node {start_node}")
+        print(f"   Start node: {start_node}")
         print(f"   Target distance: {target_distance:.1f}km")
         print(f"   Algorithm: unconstrained (shortest-path distances)")
         
