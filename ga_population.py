@@ -124,7 +124,7 @@ class PopulationInitializer:
         segments = []
         total_distance = 0.0
         visited_nodes = {current_node}
-        max_segments = 20
+        max_segments = max(20, int(target_distance_m / 250))  # ~250m per segment on average
         
         while total_distance < target_distance_m and len(segments) < max_segments:
             # Get reachable neighbors
@@ -157,8 +157,8 @@ class PopulationInitializer:
             visited_nodes.add(next_node)
             current_node = next_node
             
-            # Stop if we're close to target distance
-            if abs(total_distance - target_distance_m) < target_distance_m * 0.1:
+            # Stop if we're getting close to target distance (more flexible threshold)
+            if total_distance >= target_distance_m * 0.8:  # 80% of target distance
                 break
         
         # Return to start if not already there
@@ -180,7 +180,7 @@ class PopulationInitializer:
         current_node = self.start_node
         segments = []
         total_distance = 0.0
-        max_segments = 20
+        max_segments = max(20, int(target_distance_m / 250))  # ~250m per segment on average
         
         # Direction mappings (approximate)
         direction_bearings = {
@@ -258,7 +258,7 @@ class PopulationInitializer:
         current_node = self.start_node
         segments = []
         total_distance = 0.0
-        max_segments = 20
+        max_segments = max(20, int(target_distance_m / 250))  # ~250m per segment on average
         
         while total_distance < target_distance_m and len(segments) < max_segments:
             neighbors = self._get_reachable_neighbors(current_node, max_distance=700)
