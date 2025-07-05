@@ -278,6 +278,10 @@ class RouteChromosome:
             self.elevation_gain = sum(segment.elevation_gain for segment in self.segments)
         return self.elevation_gain
     
+    def get_total_elevation_gain(self) -> float:
+        """Alias for get_elevation_gain() for compatibility"""
+        return self.get_elevation_gain()
+    
     def get_elevation_loss(self) -> float:
         """Get total elevation loss in meters"""
         if self.elevation_loss is None:
@@ -303,6 +307,10 @@ class RouteChromosome:
         for segment in self.segments:
             nodes.append(segment.end_node)
         return nodes
+    
+    def get_nodes(self) -> List[int]:
+        """Alias for get_route_nodes() for compatibility"""
+        return self.get_route_nodes()
     
     def get_complete_path(self) -> List[int]:
         """Get complete path including all intermediate nodes"""

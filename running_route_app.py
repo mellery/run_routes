@@ -298,8 +298,16 @@ def main():
         "Algorithm",
         options=algorithms,
         index=0,
-        help="Optimization algorithm (genetic is slower but potentially better)"
+        help="Auto: Automatic selection • Nearest Neighbor: Fast TSP • Genetic: Advanced optimization"
     )
+    
+    # Show algorithm info
+    if algorithm == "auto":
+        st.sidebar.info("🤖 Auto mode selects the best algorithm based on your objective")
+    elif algorithm == "genetic":
+        st.sidebar.info("🧬 Genetic Algorithm: Slower but finds creative routes with better elevation profiles")
+    elif algorithm == "nearest_neighbor":
+        st.sidebar.info("⚡ Nearest Neighbor: Fast and reliable for distance-focused routes")
     
     # Difficulty level info
     st.sidebar.markdown("### Difficulty Levels")

@@ -834,17 +834,42 @@ def interactive_mode():
                     
                     # Get algorithm
                     print("\nAlgorithm options:")
-                    print("1. nearest_neighbor (standard TSP)")
-                    print("2. genetic (genetic algorithm)")
-                    print("3. unconstrained (shortest-path distances, no road-adjacent constraints)")
+                    available_algorithms = route_optimizer.get_available_algorithms()
+                    algo_options = []
                     
-                    algo_input = input("Select algorithm (1-3) [1]: ").strip()
+                    # Build algorithm menu based on availability
+                    option_num = 1
+                    algo_map = {}
+                    
+                    if "auto" in available_algorithms:
+                        print(f"{option_num}. auto (automatic selection based on objective)")
+                        algo_map[option_num] = "auto"
+                        algo_options.append("auto")
+                        option_num += 1
+                    
+                    if "nearest_neighbor" in available_algorithms:
+                        print(f"{option_num}. nearest_neighbor (standard TSP)")
+                        algo_map[option_num] = "nearest_neighbor"
+                        algo_options.append("nearest_neighbor")
+                        option_num += 1
+                    
+                    if "genetic" in available_algorithms:
+                        print(f"{option_num}. genetic (genetic algorithm)")
+                        algo_map[option_num] = "genetic"
+                        algo_options.append("genetic")
+                        option_num += 1
+                    
+                    # Add unconstrained option
+                    print(f"{option_num}. unconstrained (shortest-path distances, no road-adjacent constraints)")
+                    algo_map[option_num] = "unconstrained"
+                    algo_options.append("unconstrained")
+                    
+                    algo_input = input(f"Select algorithm (1-{len(algo_map)}) [1]: ").strip()
                     try:
                         algo_choice = int(algo_input) if algo_input else 1
-                        algo_map = {1: "nearest_neighbor", 2: "genetic", 3: "unconstrained"}
-                        algorithm = algo_map.get(algo_choice, "nearest_neighbor")
+                        algorithm = algo_map.get(algo_choice, "auto" if "auto" in available_algorithms else "nearest_neighbor")
                     except ValueError:
-                        algorithm = "nearest_neighbor"
+                        algorithm = "auto" if "auto" in available_algorithms else "nearest_neighbor"
                     
                     # Generate route
                     result = planner.generate_route(start_node, target_distance, objective, algorithm)
@@ -879,11 +904,15 @@ def interactive_mode():
                 # Show solver information
                 solver_info = route_optimizer.get_solver_info()
                 print("\n🔧 Solver Information:")
-                print(f"   Type: {solver_info['solver_type']}")
-                print(f"   Class: {solver_info['solver_class']}")
-                print(f"   Graph nodes: {solver_info['graph_nodes']}")
-                print(f"   Graph edges: {solver_info['graph_edges']}")
+                print(f"   TSP Solver Type: {solver_info['solver_type']}")
+                print(f"   TSP Solver Class: {solver_info['solver_class']}")
+                print(f"   GA Available: {'✅ Yes' if solver_info.get('ga_available', False) else '❌ No'}")
+                if solver_info.get('ga_available', False):
+                    print(f"   GA Optimizer: {solver_info.get('ga_optimizer', 'Unknown')}")
+                print(f"   Graph nodes: {solver_info['graph_nodes']:,}")
+                print(f"   Graph edges: {solver_info['graph_edges']:,}")
                 print(f"   Available algorithms: {', '.join(solver_info['available_algorithms'])}")
+                print(f"   Available objectives: {', '.join(solver_info['available_objectives'])}")
                 
             elif choice == '4':
                 print("👋 Goodbye!")
@@ -934,9 +963,9 @@ def main():
     
     parser.add_argument(
         '--algorithm', '-a',
-        choices=['nearest_neighbor', 'genetic', 'unconstrained'],
-        default='nearest_neighbor',
-        help='Algorithm to use (unconstrained = shortest-path distances, no road-adjacent constraints)'
+        choices=['auto', 'nearest_neighbor', 'genetic', 'unconstrained'],
+        default='auto',
+        help='Algorithm to use (auto = automatic selection, unconstrained = shortest-path distances)'
     )
     
     args = parser.parse_args()

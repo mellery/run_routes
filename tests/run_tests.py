@@ -198,6 +198,68 @@ def print_test_summary(result, test_type="tests"):
     return success
 
 
+def run_ga_integration_tests():
+    """Run GA integration tests (requires dependencies)"""
+    print("🧬🔗 Running GA Integration Tests")
+    print("=" * 50)
+    
+    missing_deps = check_dependencies()
+    if missing_deps:
+        print(f"❌ Missing dependencies: {', '.join(missing_deps)}")
+        print("📋 Install with: pip install networkx osmnx numpy matplotlib pandas")
+        return None
+    
+    try:
+        # Discover and run GA integration tests
+        loader = unittest.TestLoader()
+        suite = unittest.TestSuite()
+        
+        # Add GA integration tests
+        integration_dir = os.path.join(os.path.dirname(__file__), 'integration')
+        ga_integration_pattern = 'test_ga_*.py'
+        ga_integration_suite = loader.discover(integration_dir, pattern=ga_integration_pattern)
+        suite.addTest(ga_integration_suite)
+        
+        runner = unittest.TextTestRunner(verbosity=2, buffer=True)
+        result = runner.run(suite)
+        
+        return result
+    except Exception as e:
+        print(f"❌ Failed to run GA integration tests: {e}")
+        return None
+
+
+def run_benchmark_tests():
+    """Run benchmark tests (requires dependencies, may be slow)"""
+    print("⚡ Running Benchmark Tests (May be slow)")
+    print("=" * 50)
+    
+    missing_deps = check_dependencies()
+    if missing_deps:
+        print(f"❌ Missing dependencies: {', '.join(missing_deps)}")
+        print("📋 Install with: pip install networkx osmnx numpy matplotlib pandas")
+        return None
+    
+    try:
+        # Discover and run benchmark tests
+        loader = unittest.TestLoader()
+        suite = unittest.TestSuite()
+        
+        # Add benchmark tests
+        benchmark_dir = os.path.join(os.path.dirname(__file__), 'benchmark')
+        if os.path.exists(benchmark_dir):
+            benchmark_suite = loader.discover(benchmark_dir, pattern='test_*.py')
+            suite.addTest(benchmark_suite)
+        
+        runner = unittest.TextTestRunner(verbosity=2, buffer=True)
+        result = runner.run(suite)
+        
+        return result
+    except Exception as e:
+        print(f"❌ Failed to run benchmark tests: {e}")
+        return None
+
+
 def main():
     """Main test runner"""
     print("🚀 Route Services Test Runner")
@@ -237,6 +299,24 @@ def main():
         else:
             all_success = False
     
+    if test_type in ['ga-integration']:
+        # Run GA integration tests specifically
+        result = run_ga_integration_tests()
+        if result:
+            success = print_test_summary(result, "GA integration tests")
+            all_success = all_success and success
+        else:
+            all_success = False
+    
+    if test_type in ['benchmark']:
+        # Run benchmark tests specifically
+        result = run_benchmark_tests()
+        if result:
+            success = print_test_summary(result, "benchmark tests")
+            all_success = all_success and success
+        else:
+            all_success = False
+    
     if test_type in ['smoke', 'all']:
         # Run smoke tests if dependencies available
         result = run_smoke_tests()
@@ -246,14 +326,16 @@ def main():
         else:
             all_success = False
     
-    if test_type not in ['unit', 'ga', 'integration', 'smoke', 'all']:
-        print("Usage: python run_tests.py [unit|ga|integration|smoke|all]")
+    if test_type not in ['unit', 'ga', 'integration', 'ga-integration', 'benchmark', 'smoke', 'all']:
+        print("Usage: python run_tests.py [unit|ga|integration|ga-integration|benchmark|smoke|all]")
         print("\nTest types:")
-        print("  unit        - Run unit tests (mocked, fast)")
-        print("  ga          - Run GA tests (genetic algorithm components)")
-        print("  integration - Run integration tests (mocked)")
-        print("  smoke       - Run smoke tests (real dependencies, slower)")
-        print("  all         - Run all available tests")
+        print("  unit           - Run unit tests (mocked, fast)")
+        print("  ga             - Run GA tests (genetic algorithm components)")
+        print("  integration    - Run integration tests (mocked)")
+        print("  ga-integration - Run GA integration tests (real dependencies)")
+        print("  benchmark      - Run benchmark tests (GA vs TSP performance)")
+        print("  smoke          - Run smoke tests (real dependencies, slower)")
+        print("  all            - Run all available tests")
         print("\nDefault: unit")
         return
     
