@@ -113,9 +113,12 @@ class TestGAPerformanceCache(unittest.TestCase):
         segment2 = self.cache.get_segment(1, 2, self.test_graph)
         self.assertIsNotNone(segment2)
         
-        # Test non-existent path
-        self.test_graph.remove_edge(1, 2)
-        segment3 = self.cache.get_segment(1, 2, self.test_graph)
+        # Test non-existent path with isolated nodes
+        isolated_graph = nx.Graph()
+        isolated_graph.add_node(10)
+        isolated_graph.add_node(11)
+        # No edges between nodes 10 and 11
+        segment3 = self.cache.get_segment(10, 11, isolated_graph)
         self.assertIsNone(segment3)
     
     def test_distance_caching(self):
