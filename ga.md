@@ -1122,7 +1122,7 @@ def tune_ga_parameters(graph, test_cases):
 ### 11.1 Technical Metrics
 
 #### **Performance Targets**
-- **Execution time**: < 30 seconds for 5km routes
+- **Execution time**: < 300 seconds for 5km routes
 - **Memory usage**: < 500MB peak memory consumption
 - **Solution quality**: >= 95% of TSP solution quality for distance objectives
 - **Elevation optimization**: >= 120% of TSP elevation gain for elevation objectives
