@@ -320,13 +320,11 @@ class RouteChromosome:
         complete_path = []
         for i, segment in enumerate(self.segments):
             if i == 0:
-                complete_path.extend(segment.path_nodes[:-1])  # Exclude last node
+                # First segment: include all nodes
+                complete_path.extend(segment.path_nodes)
             else:
-                complete_path.extend(segment.path_nodes[1:-1])  # Exclude first and last
-            
-            # Always add the end node
-            if i == len(self.segments) - 1:
-                complete_path.append(segment.end_node)
+                # Subsequent segments: exclude first node (already added by previous segment)
+                complete_path.extend(segment.path_nodes[1:])
         
         return complete_path
     

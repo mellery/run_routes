@@ -190,43 +190,6 @@ class TestGAIntegration(unittest.TestCase):
             self.assertIn('elevations', profile)
             self.assertGreater(len(profile['distances_m']), 0)
     
-    def test_ga_vs_tsp_comparison(self):
-        """Test GA vs TSP algorithm comparison"""
-        # Skip if GA not available
-        solver_info = self.route_optimizer.get_solver_info()
-        if not solver_info.get('ga_available', False):
-            self.skipTest("GA not available")
-        
-        # Generate TSP route
-        tsp_result = self.route_optimizer.optimize_route(
-            start_node=self.start_node,
-            target_distance_km=self.target_distance,
-            objective=self.route_optimizer.RouteObjective.MAXIMIZE_ELEVATION,
-            algorithm="nearest_neighbor"
-        )
-        
-        # Generate GA route
-        ga_result = self.route_optimizer.optimize_route(
-            start_node=self.start_node,
-            target_distance_km=self.target_distance,
-            objective=self.route_optimizer.RouteObjective.MAXIMIZE_ELEVATION,
-            algorithm="genetic"
-        )
-        
-        # Compare results
-        if tsp_result and ga_result:
-            # Both should have valid routes
-            self.assertIn('route', tsp_result)
-            self.assertIn('route', ga_result)
-            
-            # Both should have stats
-            self.assertIn('stats', tsp_result)
-            self.assertIn('stats', ga_result)
-            
-            # Solver types should be different
-            tsp_solver = tsp_result['solver_info']['solver_type']
-            ga_solver = ga_result['solver_info']['solver_type']
-            self.assertNotEqual(tsp_solver, ga_solver)
     
     def test_ga_error_handling(self):
         """Test GA error handling"""

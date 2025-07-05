@@ -380,7 +380,7 @@ class RouteOptimizer:
         best_chromosome = ga_results.best_chromosome
         
         # Get basic route information
-        route_nodes = best_chromosome.get_nodes()
+        route_nodes = best_chromosome.get_complete_path()
         total_distance = best_chromosome.get_total_distance()
         total_elevation_gain = best_chromosome.get_total_elevation_gain()
         

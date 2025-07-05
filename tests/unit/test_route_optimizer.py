@@ -144,7 +144,7 @@ class TestRouteOptimizer(unittest.TestCase):
         optimizer = RouteOptimizer(self.mock_graph)
         algorithms = optimizer.get_available_algorithms()
         
-        expected_algorithms = ["nearest_neighbor", "genetic"]
+        expected_algorithms = ["nearest_neighbor", "auto", "genetic"]
         self.assertEqual(algorithms, expected_algorithms)
     
     @patch('tsp_solver_fast.FastRunningRouteOptimizer')

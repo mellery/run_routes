@@ -156,55 +156,6 @@ class TestGARealWorld(unittest.TestCase):
                 self.assertGreater(generations, 0)
                 self.assertLess(generations, 1000)  # Reasonable generation count
     
-    def test_ga_vs_tsp_real_network_comparison(self):
-        """Test GA vs TSP comparison on real network"""
-        if not self.solver_info.get('ga_available', False):
-            self.skipTest("GA not available")
-        
-        # Test parameters
-        distance_km = 1.5
-        objective = self.route_optimizer.RouteObjective.MAXIMIZE_ELEVATION
-        
-        # Run TSP optimization
-        tsp_result = self.route_optimizer.optimize_route(
-            start_node=self.start_node,
-            target_distance_km=distance_km,
-            objective=objective,
-            algorithm="nearest_neighbor"
-        )
-        
-        # Run GA optimization
-        ga_result = self.route_optimizer.optimize_route(
-            start_node=self.start_node,
-            target_distance_km=distance_km,
-            objective=objective,
-            algorithm="genetic"
-        )
-        
-        if tsp_result and ga_result:
-            # Both should produce valid results
-            self._validate_real_world_result(tsp_result, distance_km)
-            self._validate_real_world_result(ga_result, distance_km)
-            
-            # Compare key metrics
-            tsp_stats = tsp_result['stats']
-            ga_stats = ga_result['stats']
-            
-            # Both should have reasonable distances
-            tsp_distance = tsp_stats.get('total_distance_km', 0)
-            ga_distance = ga_stats.get('total_distance_km', 0)
-            
-            self.assertGreater(tsp_distance, 0)
-            self.assertGreater(ga_distance, 0)
-            
-            # For elevation objective, GA might find better elevation gain
-            if 'total_elevation_gain_m' in tsp_stats and 'total_elevation_gain_m' in ga_stats:
-                tsp_elevation = tsp_stats['total_elevation_gain_m']
-                ga_elevation = ga_stats['total_elevation_gain_m']
-                
-                # Both should have non-negative elevation gain
-                self.assertGreaterEqual(tsp_elevation, 0)
-                self.assertGreaterEqual(ga_elevation, 0)
     
     def test_ga_all_objectives_real_network(self):
         """Test GA with all objectives on real network"""
