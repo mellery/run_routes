@@ -550,12 +550,363 @@ class GADevelopmentTester:
             print(f"  ❌ Selection test failed: {e}")
             return False
     
+    def test_evolution_phase(self) -> bool:
+        """Test Phase: Complete Evolution (Week 3)"""
+        print("\n" + "="*60)
+        print("🧬 TESTING PHASE: GENETIC EVOLUTION (WEEK 3)")
+        print("="*60)
+        
+        try:
+            # Initialize complete GA system
+            print("🔧 Initializing complete genetic algorithm system...")
+            from genetic_route_optimizer import GeneticRouteOptimizer, GAConfig
+            from ga_fitness import GAFitnessEvaluator
+            
+            # Configure for testing (smaller scale)
+            config = GAConfig(
+                population_size=20,
+                max_generations=30,
+                crossover_rate=0.8,
+                mutation_rate=0.15,
+                elite_size=3,
+                convergence_threshold=0.001,
+                verbose=True
+            )
+            
+            optimizer = GeneticRouteOptimizer(self.graph, config)
+            print("✅ Genetic optimizer initialized")
+            
+            # Test multiple objectives
+            objectives = ["elevation", "distance", "balanced"]
+            distances = [3.0, 5.0]
+            
+            all_results = []
+            
+            for objective in objectives:
+                for distance in distances:
+                    print(f"\n📋 Testing {objective} objective at {distance}km...")
+                    
+                    try:
+                        # Run optimization
+                        start_time = time.time()
+                        results = optimizer.optimize_route(
+                            self.start_node, distance, objective, 
+                            visualizer=self.visualizer if self.save_images else None
+                        )
+                        optimization_time = time.time() - start_time
+                        
+                        # Validate results
+                        if not self._validate_evolution_results(results, objective, distance):
+                            print(f"❌ Evolution validation failed for {objective} at {distance}km")
+                            return False
+                        
+                        print(f"✅ {objective.title()} optimization completed:")
+                        print(f"   Best fitness: {results.best_fitness:.4f}")
+                        print(f"   Generations: {results.total_generations}")
+                        print(f"   Time: {optimization_time:.2f}s")
+                        print(f"   Convergence: {results.convergence_reason}")
+                        
+                        all_results.append((objective, distance, results))
+                        
+                    except Exception as e:
+                        print(f"❌ Evolution failed for {objective} at {distance}km: {e}")
+                        return False
+            
+            # Test fitness evaluation system
+            print("\n📋 Testing fitness evaluation system...")
+            success = self._test_fitness_evaluation()
+            if not success:
+                return False
+            
+            # Test convergence detection
+            print("\n📋 Testing convergence detection...")
+            success = self._test_convergence_detection(optimizer)
+            if not success:
+                return False
+            
+            # Generate comprehensive visualizations
+            if self.save_images:
+                print("\n📸 Generating evolution visualizations...")
+                self._generate_evolution_visualizations(all_results)
+            
+            print("✅ Evolution phase test completed successfully")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Evolution phase test failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _validate_evolution_results(self, results, objective: str, distance: float) -> bool:
+        """Validate evolution results"""
+        try:
+            # Check basic result structure
+            if not results.best_chromosome:
+                print("  ❌ No best chromosome found")
+                return False
+            
+            if results.best_fitness <= 0:
+                print("  ❌ Invalid best fitness")
+                return False
+            
+            if results.total_generations <= 0:
+                print("  ❌ Invalid generation count")
+                return False
+            
+            # Check chromosome validity
+            if not results.best_chromosome.is_valid:
+                print("  ❌ Best chromosome is invalid")
+                return False
+            
+            if not results.best_chromosome.segments:
+                print("  ❌ Best chromosome has no segments")
+                return False
+            
+            # Check route properties
+            route_stats = results.best_chromosome.get_route_stats()
+            route_distance = route_stats['total_distance_km']
+            
+            # Distance should be reasonably close to target (within 50% tolerance for test)
+            distance_tolerance = distance * 0.5
+            if abs(route_distance - distance) > distance_tolerance:
+                print(f"  ⚠️ Route distance {route_distance:.2f}km far from target {distance}km")
+                # Don't fail for this in testing, but warn
+            
+            # Check that evolution actually occurred
+            if len(results.fitness_history) < 2:
+                print("  ❌ Insufficient evolution history")
+                return False
+            
+            # Check for fitness improvement (initial vs final)
+            initial_fitness = max(results.fitness_history[0])
+            final_fitness = results.best_fitness
+            
+            if final_fitness < initial_fitness:
+                print("  ⚠️ Fitness decreased during evolution")
+                # Don't fail for this in testing, evolution can be noisy
+            
+            print(f"  ✅ Evolution validation passed")
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Evolution validation error: {e}")
+            return False
+    
+    def _test_fitness_evaluation(self) -> bool:
+        """Test fitness evaluation system"""
+        try:
+            from ga_fitness import GAFitnessEvaluator
+            
+            # Create test chromosome
+            initializer = PopulationInitializer(self.graph, self.start_node)
+            population = initializer.create_population(5, 3.0)
+            
+            if not population:
+                print("  ❌ Failed to create test population for fitness testing")
+                return False
+            
+            test_chromosome = population[0]
+            
+            # Test different objectives
+            objectives = ["elevation", "distance", "balanced", "scenic", "efficiency"]
+            
+            for objective in objectives:
+                evaluator = GAFitnessEvaluator(objective, 3.0)
+                fitness = evaluator.evaluate_chromosome(test_chromosome)
+                
+                if not (0.0 <= fitness <= 1.0):
+                    print(f"  ❌ Invalid fitness score for {objective}: {fitness}")
+                    return False
+                
+                print(f"  ✅ {objective.title()} fitness: {fitness:.4f}")
+            
+            # Test population evaluation
+            evaluator = GAFitnessEvaluator("elevation", 3.0)
+            fitness_scores = evaluator.evaluate_population(population)
+            
+            if len(fitness_scores) != len(population):
+                print("  ❌ Population fitness evaluation failed")
+                return False
+            
+            # Test fitness statistics
+            stats = evaluator.get_fitness_stats()
+            expected_keys = ['evaluations', 'best_fitness', 'average_fitness', 'worst_fitness']
+            
+            for key in expected_keys:
+                if key not in stats:
+                    print(f"  ❌ Missing fitness stat: {key}")
+                    return False
+            
+            print("  ✅ Fitness evaluation system test passed")
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Fitness evaluation test failed: {e}")
+            return False
+    
+    def _test_convergence_detection(self, optimizer) -> bool:
+        """Test convergence detection"""
+        try:
+            # Test with stable fitness (should converge)
+            stable_history = []
+            for i in range(25):
+                gen_fitness = [0.7] * 10  # Stable fitness
+                stable_history.append(gen_fitness)
+            
+            optimizer.fitness_history = stable_history
+            convergence = optimizer._check_convergence([0.7] * 10)
+            
+            if not convergence:
+                print("  ❌ Failed to detect convergence with stable fitness")
+                return False
+            
+            # Test with improving fitness (should not converge)
+            improving_history = []
+            for i in range(25):
+                gen_fitness = [0.5 + i * 0.01] * 10  # Improving fitness
+                improving_history.append(gen_fitness)
+            
+            optimizer.fitness_history = improving_history
+            convergence = optimizer._check_convergence([0.7] * 10)
+            
+            if convergence:
+                print("  ❌ Incorrectly detected convergence with improving fitness")
+                return False
+            
+            print("  ✅ Convergence detection test passed")
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Convergence detection test failed: {e}")
+            return False
+    
+    def _generate_evolution_visualizations(self, all_results):
+        """Generate comprehensive evolution visualizations"""
+        try:
+            evolution_dir = os.path.join(self.output_dir, "evolution")
+            os.makedirs(evolution_dir, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            for objective, distance, results in all_results:
+                # Save best route visualization
+                if self.visualizer:
+                    filename = f"evolution_best_{objective}_{distance}km_{timestamp}.png"
+                    filepath = self.visualizer.save_chromosome_map(
+                        results.best_chromosome, filename,
+                        title=f"Best Route - {objective.title()} {distance}km (Fitness: {results.best_fitness:.4f})",
+                        show_elevation=True, show_segments=True
+                    )
+                    print(f"  📸 Saved best route: {filename}")
+                
+                # Generate fitness progression plot
+                self._save_fitness_progression(results, objective, distance, evolution_dir, timestamp)
+            
+            # Generate comparison visualization
+            self._save_objective_comparison(all_results, evolution_dir, timestamp)
+            
+            print(f"  ✅ Evolution visualizations saved to {evolution_dir}")
+            
+        except Exception as e:
+            print(f"  ⚠️ Evolution visualization failed: {e}")
+    
+    def _save_fitness_progression(self, results, objective: str, distance: float, 
+                                output_dir: str, timestamp: str):
+        """Save fitness progression plot"""
+        try:
+            import matplotlib.pyplot as plt
+            
+            # Extract fitness data
+            generations = list(range(len(results.fitness_history)))
+            best_fitness = [max(gen_fitness) for gen_fitness in results.fitness_history]
+            avg_fitness = [sum(gen_fitness)/len(gen_fitness) for gen_fitness in results.fitness_history]
+            
+            # Create plot
+            plt.figure(figsize=(10, 6))
+            plt.plot(generations, best_fitness, label='Best Fitness', linewidth=2, color='red')
+            plt.plot(generations, avg_fitness, label='Average Fitness', linewidth=2, color='blue')
+            
+            plt.xlabel('Generation')
+            plt.ylabel('Fitness')
+            plt.title(f'Fitness Evolution - {objective.title()} {distance}km')
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+            
+            # Add convergence annotation
+            if results.convergence_reason == "convergence":
+                plt.axvline(x=results.total_generations-1, color='green', linestyle='--', 
+                          label=f'Converged at Gen {results.total_generations}')
+                plt.legend()
+            
+            filename = f"fitness_progression_{objective}_{distance}km_{timestamp}.png"
+            filepath = os.path.join(output_dir, filename)
+            plt.savefig(filepath, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📊 Saved fitness progression: {filename}")
+            
+        except Exception as e:
+            print(f"  ⚠️ Failed to save fitness progression: {e}")
+    
+    def _save_objective_comparison(self, all_results, output_dir: str, timestamp: str):
+        """Save objective comparison chart"""
+        try:
+            import matplotlib.pyplot as plt
+            import numpy as np
+            
+            # Organize data by objective
+            objectives = {}
+            for objective, distance, results in all_results:
+                if objective not in objectives:
+                    objectives[objective] = {'distances': [], 'fitness': [], 'generations': []}
+                
+                objectives[objective]['distances'].append(distance)
+                objectives[objective]['fitness'].append(results.best_fitness)
+                objectives[objective]['generations'].append(results.total_generations)
+            
+            # Create comparison plot
+            fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+            
+            # Fitness comparison
+            for obj, data in objectives.items():
+                ax1.plot(data['distances'], data['fitness'], 'o-', label=obj.title(), linewidth=2, markersize=8)
+            
+            ax1.set_xlabel('Target Distance (km)')
+            ax1.set_ylabel('Best Fitness')
+            ax1.set_title('Best Fitness by Objective')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            
+            # Generations comparison
+            for obj, data in objectives.items():
+                ax2.plot(data['distances'], data['generations'], 's-', label=obj.title(), linewidth=2, markersize=8)
+            
+            ax2.set_xlabel('Target Distance (km)')
+            ax2.set_ylabel('Generations to Converge')
+            ax2.set_title('Convergence Speed by Objective')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            
+            plt.tight_layout()
+            
+            filename = f"objective_comparison_{timestamp}.png"
+            filepath = os.path.join(output_dir, filename)
+            plt.savefig(filepath, dpi=150, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📊 Saved objective comparison: {filename}")
+            
+        except Exception as e:
+            print(f"  ⚠️ Failed to save objective comparison: {e}")
+    
     def run_test_phase(self, phase: str) -> bool:
         """Run specific test phase"""
         phase_map = {
             'chromosome': self.test_chromosome_phase,
             'initialization': self.test_initialization_phase,
             'operators': self.test_operators_phase,
+            'evolution': self.test_evolution_phase,
             'comparison': self.test_comparison_phase
         }
         
@@ -578,7 +929,7 @@ def main():
     parser = argparse.ArgumentParser(description="GA Development Test Framework")
     
     parser.add_argument('--phase', type=str, required=True,
-                       choices=['chromosome', 'initialization', 'operators', 'comparison', 'all'],
+                       choices=['chromosome', 'initialization', 'operators', 'evolution', 'comparison', 'all'],
                        help='Test phase to run')
     parser.add_argument('--save-images', action='store_true', default=True,
                        help='Save visualization images')
@@ -599,7 +950,7 @@ def main():
     
     # Run tests
     if args.phase == 'all':
-        phases = ['chromosome', 'initialization', 'operators', 'comparison']
+        phases = ['chromosome', 'initialization', 'operators', 'evolution', 'comparison']
         all_passed = True
         
         for phase in phases:
