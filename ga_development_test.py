@@ -17,7 +17,17 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from route_services.network_manager import NetworkManager
 from ga_chromosome import RouteChromosome, RouteSegment
 from ga_population import PopulationInitializer
-from ga_visualizer import GAVisualizer
+from ga_operators import GAOperators
+from ga_operator_visualization import GAOperatorVisualizer
+
+# Optional imports for visualization
+try:
+    from ga_visualizer import GAVisualizer
+    VISUALIZER_AVAILABLE = True
+except ImportError:
+    GAVisualizer = None
+    VISUALIZER_AVAILABLE = False
+    print("⚠️ GAVisualizer not available (folium dependency missing)")
 
 
 class GADevelopmentTester:
@@ -43,6 +53,7 @@ class GADevelopmentTester:
         self.graph = None
         self.visualizer = None
         self.start_node = NetworkManager.DEFAULT_START_NODE
+        self.visualizer_available = VISUALIZER_AVAILABLE
         
         print(f"📁 Output directory: {output_dir}")
         print(f"📸 Save images: {save_images}")
@@ -66,9 +77,11 @@ class GADevelopmentTester:
                 print(f"📍 Using start node: {self.start_node}")
             
             # Initialize visualizer
-            if self.save_images:
+            if self.save_images and self.visualizer_available:
                 self.visualizer = GAVisualizer(self.graph, self.output_dir)
                 print("✅ Visualizer initialized")
+            elif self.save_images:
+                print("⚠️ Visualizer not available due to missing dependencies")
             
             return True
             
@@ -355,11 +368,194 @@ class GADevelopmentTester:
         else:
             print(f"⚠️ TSP Route: Not available for comparison")
     
+    def test_operators_phase(self) -> bool:
+        """Test Phase: Genetic Operators (Week 2)"""
+        print("\n" + "="*60)
+        print("🧬 TESTING PHASE: GENETIC OPERATORS (WEEK 2)")
+        print("="*60)
+        
+        try:
+            # Initialize operators
+            print("🔧 Initializing genetic operators...")
+            operators = GAOperators(self.graph)
+            print("✅ Operators initialized")
+            
+            # Create test parents
+            print("👥 Creating test parent chromosomes...")
+            initializer = PopulationInitializer(self.graph, self.start_node)
+            population = initializer.create_population(4, 3.0)
+            
+            if len(population) < 2:
+                print("❌ Failed to create enough chromosomes for operator testing")
+                return False
+            
+            parent1, parent2 = population[0], population[1]
+            print(f"✅ Parent chromosomes created: {len(parent1.segments)} and {len(parent2.segments)} segments")
+            
+            # Test crossover operators
+            print("\n🔄 Testing Crossover Operators:")
+            success = self._test_crossover_operators(operators, parent1, parent2)
+            if not success:
+                return False
+            
+            # Test mutation operators  
+            print("\n🔀 Testing Mutation Operators:")
+            success = self._test_mutation_operators(operators, parent1)
+            if not success:
+                return False
+            
+            # Test selection operators
+            print("\n🎯 Testing Selection Operators:")
+            success = self._test_selection_operators(operators, population)
+            if not success:
+                return False
+            
+            # Generate operator visualizations
+            if self.save_images:
+                print("\n📸 Generating operator visualizations...")
+                operator_visualizer = GAOperatorVisualizer(self.graph)
+                viz_dir = os.path.join(self.output_dir, "operators")
+                
+                operator_visualizer.visualize_crossover_operators(viz_dir)
+                operator_visualizer.visualize_mutation_operators(viz_dir)
+                operator_visualizer.visualize_selection_operators(viz_dir)
+                operator_visualizer.visualize_operator_effects(viz_dir)
+                
+                print(f"✅ Operator visualizations saved to {viz_dir}")
+            
+            print("✅ Operators phase test completed successfully")
+            return True
+            
+        except Exception as e:
+            print(f"❌ Operators phase test failed: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
+    
+    def _test_crossover_operators(self, operators: GAOperators, 
+                                parent1: RouteChromosome, parent2: RouteChromosome) -> bool:
+        """Test crossover operators"""
+        try:
+            # Test segment exchange crossover
+            print("  📋 Testing segment exchange crossover...")
+            offspring1, offspring2 = operators.segment_exchange_crossover(parent1, parent2)
+            
+            if not isinstance(offspring1, RouteChromosome) or not isinstance(offspring2, RouteChromosome):
+                print("  ❌ Segment exchange crossover failed to return chromosomes")
+                return False
+            
+            print(f"  ✅ Segment exchange: {len(offspring1.segments)}, {len(offspring2.segments)} segments")
+            print(f"     Creation methods: {offspring1.creation_method}, {offspring2.creation_method}")
+            
+            # Test path splice crossover
+            print("  📋 Testing path splice crossover...")
+            offspring3, offspring4 = operators.path_splice_crossover(parent1, parent2)
+            
+            if not isinstance(offspring3, RouteChromosome) or not isinstance(offspring4, RouteChromosome):
+                print("  ❌ Path splice crossover failed to return chromosomes")
+                return False
+            
+            print(f"  ✅ Path splice: {len(offspring3.segments)}, {len(offspring4.segments)} segments")
+            print(f"     Creation methods: {offspring3.creation_method}, {offspring4.creation_method}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Crossover test failed: {e}")
+            return False
+    
+    def _test_mutation_operators(self, operators: GAOperators, chromosome: RouteChromosome) -> bool:
+        """Test mutation operators"""
+        try:
+            original_segments = len(chromosome.segments)
+            
+            # Test segment replacement mutation
+            print("  📋 Testing segment replacement mutation...")
+            mutated1 = operators.segment_replacement_mutation(chromosome, mutation_rate=1.0)
+            
+            if not isinstance(mutated1, RouteChromosome):
+                print("  ❌ Segment replacement mutation failed")
+                return False
+            
+            print(f"  ✅ Segment replacement: {len(mutated1.segments)} segments (was {original_segments})")
+            
+            # Test route extension mutation
+            print("  📋 Testing route extension mutation...")
+            mutated2 = operators.route_extension_mutation(chromosome, 4.0, mutation_rate=1.0)
+            
+            if not isinstance(mutated2, RouteChromosome):
+                print("  ❌ Route extension mutation failed")
+                return False
+            
+            print(f"  ✅ Route extension: {len(mutated2.segments)} segments (was {original_segments})")
+            
+            # Test elevation bias mutation
+            print("  📋 Testing elevation bias mutation...")
+            mutated3 = operators.elevation_bias_mutation(chromosome, "elevation", mutation_rate=1.0)
+            
+            if not isinstance(mutated3, RouteChromosome):
+                print("  ❌ Elevation bias mutation failed")
+                return False
+            
+            print(f"  ✅ Elevation bias: {len(mutated3.segments)} segments (was {original_segments})")
+            
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Mutation test failed: {e}")
+            return False
+    
+    def _test_selection_operators(self, operators: GAOperators, population: List[RouteChromosome]) -> bool:
+        """Test selection operators"""
+        try:
+            # Assign fitness values for testing
+            for i, chromo in enumerate(population):
+                chromo.fitness = 0.5 + i * 0.1  # Ascending fitness
+            
+            # Test tournament selection
+            print("  📋 Testing tournament selection...")
+            selected = operators.tournament_selection(population, tournament_size=3)
+            
+            if not isinstance(selected, RouteChromosome):
+                print("  ❌ Tournament selection failed")
+                return False
+            
+            print(f"  ✅ Tournament selection: fitness {selected.fitness:.2f}")
+            
+            # Test elitism selection  
+            print("  📋 Testing elitism selection...")
+            elite = operators.elitism_selection(population, elite_size=2)
+            
+            if not isinstance(elite, list) or len(elite) != 2:
+                print("  ❌ Elitism selection failed")
+                return False
+            
+            elite_fitnesses = [c.fitness for c in elite]
+            print(f"  ✅ Elitism selection: {len(elite)} elite with fitness {elite_fitnesses}")
+            
+            # Test diversity selection
+            print("  📋 Testing diversity selection...")
+            diverse = operators.diversity_selection(population, selection_size=3)
+            
+            if not isinstance(diverse, list) or len(diverse) != 3:
+                print("  ❌ Diversity selection failed")
+                return False
+            
+            diverse_fitnesses = [c.fitness for c in diverse]
+            print(f"  ✅ Diversity selection: {len(diverse)} selected with fitness {diverse_fitnesses}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"  ❌ Selection test failed: {e}")
+            return False
+    
     def run_test_phase(self, phase: str) -> bool:
         """Run specific test phase"""
         phase_map = {
             'chromosome': self.test_chromosome_phase,
             'initialization': self.test_initialization_phase,
+            'operators': self.test_operators_phase,
             'comparison': self.test_comparison_phase
         }
         
@@ -382,7 +578,7 @@ def main():
     parser = argparse.ArgumentParser(description="GA Development Test Framework")
     
     parser.add_argument('--phase', type=str, required=True,
-                       choices=['chromosome', 'initialization', 'comparison', 'all'],
+                       choices=['chromosome', 'initialization', 'operators', 'comparison', 'all'],
                        help='Test phase to run')
     parser.add_argument('--save-images', action='store_true', default=True,
                        help='Save visualization images')
@@ -403,7 +599,7 @@ def main():
     
     # Run tests
     if args.phase == 'all':
-        phases = ['chromosome', 'initialization', 'comparison']
+        phases = ['chromosome', 'initialization', 'operators', 'comparison']
         all_passed = True
         
         for phase in phases:
