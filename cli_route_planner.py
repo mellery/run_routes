@@ -865,6 +865,15 @@ def interactive_mode():
                     except ValueError:
                         algorithm = "auto" if "auto" in available_algorithms else "nearest_neighbor"
                     
+                    # Check if we need to expand network for larger routes
+                    if target_distance > 8.0:  # For routes > 8km
+                        required_radius = min(target_distance * 0.8, 25.0)  # 80% of distance, max 25km
+                        print(f"🌐 Large route detected ({target_distance}km), expanding network to {required_radius:.1f}km radius...")
+                        
+                        if not planner.initialize_services(radius_km=required_radius):
+                            print("❌ Failed to expand network")
+                            continue
+                    
                     # Generate route
                     result = planner.generate_route(start_node, target_distance, objective, algorithm)
                     
@@ -970,7 +979,13 @@ def main():
         # Command line mode
         planner = RefactoredCLIRoutePlanner()
         
-        if not planner.initialize_services():
+        # Determine required network radius based on target distance
+        required_radius = 5.0  # Default
+        if args.distance and args.distance > 8.0:
+            required_radius = min(args.distance * 0.8, 25.0)  # 80% of distance, max 25km
+            print(f"🌐 Large route detected ({args.distance}km), using {required_radius:.1f}km network radius")
+        
+        if not planner.initialize_services(radius_km=required_radius):
             sys.exit(1)
         
         route_optimizer = planner.services['route_optimizer']

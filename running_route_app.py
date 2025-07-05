@@ -40,7 +40,7 @@ def initialize_route_services():
         with st.spinner("Initializing route planning services..."):
             # Create network manager and load graph
             network_manager = NetworkManager()
-            graph = network_manager.load_network(radius_km=0.8)
+            graph = network_manager.load_network(radius_km=2.5)  # Larger default for web interface
             
             if not graph:
                 st.error("Failed to load street network")
@@ -275,11 +275,17 @@ def main():
     target_distance = st.sidebar.slider(
         "Target Distance (km)",
         min_value=0.5,
-        max_value=10.0,
+        max_value=25.0,
         value=5.0,
         step=0.1,
-        help="Desired route distance (±20% tolerance)"
+        help="Desired route distance (±20% tolerance). Routes >8km will automatically expand network coverage."
     )
+    
+    # Check if we need larger network for this distance
+    if target_distance > 8.0 and graph and len(graph.nodes) < 1000:  # Small network indicator
+        st.sidebar.warning(f"⚠️ Large route ({target_distance}km) may be limited by current network size. Consider using CLI for routes >8km.")
+    elif target_distance > 25.0:
+        st.sidebar.error("❌ Routes >25km are not supported in web interface. Use CLI instead.")
     
     # Route objective
     objectives = route_optimizer.get_available_objectives()
