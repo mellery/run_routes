@@ -212,6 +212,9 @@ class RouteChromosome:
         self.parent_ids = []               # Parent chromosome IDs (for tracking)
         self.creation_method = "unknown"   # How chromosome was created
         
+        # Segment usage tracking
+        self._segment_usage = {}           # Track usage count for each edge direction
+        
     def add_segment(self, segment: RouteSegment) -> None:
         """Add a segment to the route"""
         self.segments.append(segment)
@@ -239,9 +242,10 @@ class RouteChromosome:
         self.diversity_score = None
         self.difficulty_score = None
         self.objective_score = None
+        self._segment_usage = {}  # Reset segment usage tracking
     
     def validate_connectivity(self) -> bool:
-        """Validate that all segments are properly connected"""
+        """Validate that all segments are properly connected and respect usage limits"""
         if not self.segments:
             self.is_valid = False
             return False
@@ -263,8 +267,56 @@ class RouteChromosome:
             self.segments[0].start_node == self.segments[-1].end_node):
             self.is_circular = True
         
+        # Validate segment usage limits
+        if not self._validate_segment_usage():
+            self.is_valid = False
+            return False
+        
         self.is_valid = True
         return True
+    
+    def _validate_segment_usage(self) -> bool:
+        """Validate that no segment is used more than twice (once in each direction)"""
+        self._segment_usage = {}
+        
+        for segment in self.segments:
+            # Create edge key (smaller node first for consistency)
+            edge_key = tuple(sorted([segment.start_node, segment.end_node]))
+            
+            # Track direction
+            if segment.start_node < segment.end_node:
+                direction = "forward"
+            else:
+                direction = "backward"
+            
+            # Initialize usage tracking for this edge
+            if edge_key not in self._segment_usage:
+                self._segment_usage[edge_key] = {"forward": 0, "backward": 0}
+            
+            # Increment usage count
+            self._segment_usage[edge_key][direction] += 1
+            
+            # Check if limit exceeded (max 1 time per direction)
+            if self._segment_usage[edge_key][direction] > 1:
+                return False
+        
+        return True
+    
+    def get_segment_usage_stats(self) -> Dict[str, Any]:
+        """Get statistics about segment usage"""
+        if not self._segment_usage:
+            self._validate_segment_usage()
+        
+        total_edges = len(self._segment_usage)
+        bidirectional_edges = sum(1 for usage in self._segment_usage.values() 
+                                 if usage["forward"] > 0 and usage["backward"] > 0)
+        
+        return {
+            "total_unique_edges": total_edges,
+            "bidirectional_edges": bidirectional_edges,
+            "usage_efficiency": (total_edges - bidirectional_edges) / max(total_edges, 1),
+            "edge_usage_details": self._segment_usage.copy()
+        }
     
     def get_total_distance(self) -> float:
         """Get total route distance in meters"""
@@ -358,6 +410,7 @@ class RouteChromosome:
     
     def get_route_stats(self) -> Dict[str, Any]:
         """Get comprehensive route statistics"""
+        usage_stats = self.get_segment_usage_stats()
         return {
             'total_distance_km': self.get_total_distance() / 1000,
             'total_distance_m': self.get_total_distance(),
@@ -371,6 +424,9 @@ class RouteChromosome:
             'is_circular': self.is_circular,
             'diversity_score': self.calculate_diversity_score(),
             'estimated_time_min': self.get_total_distance() / 1000 / 8.0 * 60,  # 8 km/h pace
+            'unique_edges': usage_stats['total_unique_edges'],
+            'bidirectional_edges': usage_stats['bidirectional_edges'],
+            'usage_efficiency': usage_stats['usage_efficiency'],
         }
     
     def copy(self) -> 'RouteChromosome':
@@ -388,6 +444,7 @@ class RouteChromosome:
         new_chromosome.generation = self.generation
         new_chromosome.parent_ids = self.parent_ids.copy()
         new_chromosome.creation_method = self.creation_method
+        new_chromosome._segment_usage = self._segment_usage.copy()
         return new_chromosome
     
     def to_route_result(self, objective: str, solve_time: float = 0.0) -> Dict[str, Any]:

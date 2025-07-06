@@ -356,7 +356,8 @@ class TestRouteChromosome(unittest.TestCase):
             'total_distance_km', 'total_distance_m', 'total_elevation_gain_m',
             'total_elevation_loss_m', 'net_elevation_gain_m', 'max_grade_percent',
             'segment_count', 'node_count', 'is_valid', 'is_circular',
-            'diversity_score', 'estimated_time_min'
+            'diversity_score', 'estimated_time_min', 'unique_edges',
+            'bidirectional_edges', 'usage_efficiency'
         ]
         
         for key in required_keys:
@@ -436,6 +437,78 @@ class TestRouteChromosome(unittest.TestCase):
         
         self.assertNotEqual(distance1, distance2)
         self.assertGreater(distance2, distance1)
+    
+    def test_chromosome_segment_usage_validation(self):
+        """Test segment usage validation"""
+        # Create a chromosome with repeated segments
+        chromosome = RouteChromosome([self.segment1, self.segment1])  # Same segment twice
+        
+        # Should be invalid due to repeated segment usage
+        is_valid = chromosome.validate_connectivity()
+        self.assertFalse(is_valid)
+        self.assertFalse(chromosome.is_valid)
+    
+    def test_chromosome_segment_usage_bidirectional(self):
+        """Test segment usage with bidirectional travel"""
+        # Create reverse segment
+        reverse_segment = RouteSegment(2, 1, [2, 1])
+        reverse_segment.calculate_properties(self.mock_graph)
+        
+        # Should be valid - same edge but different directions
+        chromosome = RouteChromosome([self.segment1, reverse_segment])
+        is_valid = chromosome.validate_connectivity()
+        
+        self.assertTrue(is_valid)
+        self.assertTrue(chromosome.is_valid)
+    
+    def test_chromosome_segment_usage_stats(self):
+        """Test segment usage statistics"""
+        # Create reverse segment
+        reverse_segment = RouteSegment(2, 1, [2, 1])
+        reverse_segment.calculate_properties(self.mock_graph)
+        
+        chromosome = RouteChromosome([self.segment1, reverse_segment])
+        chromosome.validate_connectivity()
+        
+        usage_stats = chromosome.get_segment_usage_stats()
+        
+        self.assertIn('total_unique_edges', usage_stats)
+        self.assertIn('bidirectional_edges', usage_stats)
+        self.assertIn('usage_efficiency', usage_stats)
+        self.assertIn('edge_usage_details', usage_stats)
+        
+        # Should have 1 unique edge used in both directions
+        self.assertEqual(usage_stats['total_unique_edges'], 1)
+        self.assertEqual(usage_stats['bidirectional_edges'], 1)
+        self.assertEqual(usage_stats['usage_efficiency'], 0.0)  # (1-1)/1 = 0
+    
+    def test_chromosome_segment_usage_limit_exceeded(self):
+        """Test segment usage limit exceeded"""
+        # Create three segments using the same edge in the same direction
+        segment1_dup = RouteSegment(1, 2, [1, 2])
+        segment1_dup.calculate_properties(self.mock_graph)
+        
+        chromosome = RouteChromosome([self.segment1, segment1_dup])
+        is_valid = chromosome.validate_connectivity()
+        
+        # Should be invalid - same edge used twice in same direction
+        self.assertFalse(is_valid)
+        self.assertFalse(chromosome.is_valid)
+    
+    def test_chromosome_segment_usage_complex_route(self):
+        """Test segment usage with complex route"""
+        # Create a route that uses multiple edges
+        chromosome = RouteChromosome([self.segment1, self.segment2, self.segment3])
+        is_valid = chromosome.validate_connectivity()
+        
+        # Should be valid - all different edges
+        self.assertTrue(is_valid)
+        self.assertTrue(chromosome.is_valid)
+        
+        usage_stats = chromosome.get_segment_usage_stats()
+        self.assertEqual(usage_stats['total_unique_edges'], 3)
+        self.assertEqual(usage_stats['bidirectional_edges'], 0)
+        self.assertEqual(usage_stats['usage_efficiency'], 1.0)  # (3-0)/3 = 1.0
 
 
 if __name__ == '__main__':

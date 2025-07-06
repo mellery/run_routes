@@ -653,12 +653,16 @@ class GAOperators:
         return reduced
     
     def _repair_chromosome(self, chromosome: RouteChromosome) -> RouteChromosome:
-        """Repair chromosome connectivity and validate"""
+        """Repair chromosome connectivity and validate segment usage limits"""
         if not chromosome.segments:
             return chromosome
         
         # Validate connectivity and repair if needed
         chromosome.validate_connectivity()
+        
+        # If segment usage validation failed, attempt repair
+        if not chromosome.is_valid:
+            chromosome = self._repair_segment_usage(chromosome)
         
         # Recalculate properties
         for segment in chromosome.segments:
@@ -684,6 +688,64 @@ class GAOperators:
         diversity_bonus = diversity_bonus / max(len(selected), 1)
         
         return base_fitness + diversity_bonus * 0.1
+    
+    def _repair_segment_usage(self, chromosome: RouteChromosome) -> RouteChromosome:
+        """Repair chromosome to respect segment usage limits"""
+        if not chromosome.segments:
+            return chromosome
+        
+        # Track segment usage
+        segment_usage = {}
+        repaired_segments = []
+        
+        for segment in chromosome.segments:
+            # Create edge key (smaller node first for consistency)
+            edge_key = tuple(sorted([segment.start_node, segment.end_node]))
+            
+            # Track direction
+            if segment.start_node < segment.end_node:
+                direction = "forward"
+            else:
+                direction = "backward"
+            
+            # Initialize usage tracking for this edge
+            if edge_key not in segment_usage:
+                segment_usage[edge_key] = {"forward": 0, "backward": 0}
+            
+            # Check if this segment would exceed usage limit
+            if segment_usage[edge_key][direction] < 1:
+                # Segment can be used
+                segment_usage[edge_key][direction] += 1
+                repaired_segments.append(segment)
+            else:
+                # Segment usage limit exceeded, try to find alternative
+                alternative_segment = self._find_alternative_segment(
+                    segment.start_node, 
+                    segment.end_node,
+                    exclude_path=segment.path_nodes
+                )
+                
+                if alternative_segment:
+                    # Check if alternative segment would also exceed limits
+                    alt_edge_key = tuple(sorted([alternative_segment.start_node, alternative_segment.end_node]))
+                    alt_direction = "forward" if alternative_segment.start_node < alternative_segment.end_node else "backward"
+                    
+                    if alt_edge_key not in segment_usage:
+                        segment_usage[alt_edge_key] = {"forward": 0, "backward": 0}
+                    
+                    if segment_usage[alt_edge_key][alt_direction] < 1:
+                        segment_usage[alt_edge_key][alt_direction] += 1
+                        repaired_segments.append(alternative_segment)
+                    # If no alternative can be used, skip this segment
+                # If no alternative found, skip this segment
+        
+        # Create repaired chromosome
+        repaired_chromosome = RouteChromosome(repaired_segments)
+        repaired_chromosome.creation_method = chromosome.creation_method + "_repaired"
+        repaired_chromosome.parent_ids = chromosome.parent_ids
+        repaired_chromosome.generation = chromosome.generation
+        
+        return repaired_chromosome
 
 
 def test_ga_operators():

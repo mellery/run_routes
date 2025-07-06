@@ -10,3 +10,4 @@ tests/archive/
 coverage_data.json
 coverage.xml
 .coverage
+elevation_data/

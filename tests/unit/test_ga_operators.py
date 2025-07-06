@@ -117,8 +117,9 @@ class TestGAOperators(unittest.TestCase):
         
         self.assertIsInstance(offspring1, RouteChromosome)
         self.assertIsInstance(offspring2, RouteChromosome)
-        self.assertEqual(offspring1.creation_method, "path_splice_crossover")
-        self.assertEqual(offspring2.creation_method, "path_splice_crossover")
+        # Creation method may include "_repaired" suffix due to segment usage validation
+        self.assertIn("path_splice_crossover", offspring1.creation_method)
+        self.assertIn("path_splice_crossover", offspring2.creation_method)
     
     def test_path_splice_crossover_empty_parents(self):
         """Test path splice crossover with empty parents"""

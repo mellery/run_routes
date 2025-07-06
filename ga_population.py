@@ -119,12 +119,13 @@ class PopulationInitializer:
         return valid_population[:size]  # Return exactly requested size
     
     def _create_random_walk_route(self, target_distance_m: float) -> Optional[RouteChromosome]:
-        """Create route using random walk strategy"""
+        """Create route using random walk strategy with segment usage validation"""
         current_node = self.start_node
         segments = []
         total_distance = 0.0
         visited_nodes = {current_node}
         max_segments = max(20, int(target_distance_m / 250))  # ~250m per segment on average
+        segment_usage = {}  # Track segment usage during construction
         
         while total_distance < target_distance_m and len(segments) < max_segments:
             # Get reachable neighbors
@@ -139,18 +140,31 @@ class PopulationInitializer:
             if not available_neighbors:
                 available_neighbors = neighbors  # Use any neighbor if no unvisited
             
-            if not available_neighbors:
+            # Filter out neighbors that would violate segment usage constraints
+            valid_neighbors = []
+            for neighbor in available_neighbors:
+                if self._can_use_segment(current_node, neighbor, segment_usage):
+                    valid_neighbors.append(neighbor)
+            
+            if not valid_neighbors:
+                # If no valid neighbors, try fallback with any available neighbor
+                valid_neighbors = available_neighbors
+            
+            if not valid_neighbors:
                 break
             
             # Select next node with distance bias
             next_node = self._select_distance_biased_neighbor(
-                available_neighbors, current_node, target_distance_m - total_distance
+                valid_neighbors, current_node, target_distance_m - total_distance
             )
             
             # Create segment
             segment = self._create_segment(current_node, next_node)
             if not segment or not segment.is_valid:
                 break
+            
+            # Update segment usage tracking
+            self._update_segment_usage(current_node, next_node, segment_usage)
             
             segments.append(segment)
             total_distance += segment.length
@@ -163,9 +177,11 @@ class PopulationInitializer:
         
         # Return to start if not already there
         if current_node != self.start_node and segments:
-            return_segment = self._create_segment(current_node, self.start_node)
-            if return_segment and return_segment.is_valid:
-                segments.append(return_segment)
+            # Check if we can use the return segment
+            if self._can_use_segment(current_node, self.start_node, segment_usage):
+                return_segment = self._create_segment(current_node, self.start_node)
+                if return_segment and return_segment.is_valid:
+                    segments.append(return_segment)
         
         if segments:
             chromosome = RouteChromosome(segments)
@@ -176,11 +192,12 @@ class PopulationInitializer:
     
     def _create_directional_route(self, target_distance_m: float, 
                                  preferred_direction: str) -> Optional[RouteChromosome]:
-        """Create route with directional bias"""
+        """Create route with directional bias and segment usage validation"""
         current_node = self.start_node
         segments = []
         total_distance = 0.0
         max_segments = max(20, int(target_distance_m / 250))  # ~250m per segment on average
+        segment_usage = {}  # Track segment usage during construction
         
         # Direction mappings (approximate)
         direction_bearings = {
@@ -195,11 +212,17 @@ class PopulationInitializer:
             if not neighbors:
                 break
             
+            # Filter neighbors that would violate segment usage constraints
+            valid_neighbors = [n for n in neighbors if self._can_use_segment(current_node, n, segment_usage)]
+            
+            if not valid_neighbors:
+                valid_neighbors = neighbors  # Fallback to any neighbor
+            
             # Select neighbor closest to preferred direction
             best_neighbor = None
             best_score = float('inf')
             
-            for neighbor in neighbors:
+            for neighbor in valid_neighbors:
                 bearing = self._calculate_bearing(current_node, neighbor)
                 if bearing is not None:
                     # Calculate angular difference
@@ -215,12 +238,15 @@ class PopulationInitializer:
                         best_neighbor = neighbor
             
             if not best_neighbor:
-                best_neighbor = random.choice(neighbors)
+                best_neighbor = random.choice(valid_neighbors)
             
             # Create segment
             segment = self._create_segment(current_node, best_neighbor)
             if not segment or not segment.is_valid:
                 break
+            
+            # Update segment usage tracking
+            self._update_segment_usage(current_node, best_neighbor, segment_usage)
             
             segments.append(segment)
             total_distance += segment.length
@@ -242,9 +268,10 @@ class PopulationInitializer:
         
         # Return to start
         if current_node != self.start_node and segments:
-            return_segment = self._create_segment(current_node, self.start_node)
-            if return_segment and return_segment.is_valid:
-                segments.append(return_segment)
+            if self._can_use_segment(current_node, self.start_node, segment_usage):
+                return_segment = self._create_segment(current_node, self.start_node)
+                if return_segment and return_segment.is_valid:
+                    segments.append(return_segment)
         
         if segments:
             chromosome = RouteChromosome(segments)
@@ -474,6 +501,26 @@ class PopulationInitializer:
             
         except Exception:
             return None
+    
+    def _can_use_segment(self, start_node: int, end_node: int, segment_usage: dict) -> bool:
+        """Check if a segment can be used without violating usage constraints"""
+        edge_key = tuple(sorted([start_node, end_node]))
+        direction = "forward" if start_node < end_node else "backward"
+        
+        if edge_key not in segment_usage:
+            return True
+        
+        return segment_usage[edge_key].get(direction, 0) < 1
+    
+    def _update_segment_usage(self, start_node: int, end_node: int, segment_usage: dict):
+        """Update segment usage tracking"""
+        edge_key = tuple(sorted([start_node, end_node]))
+        direction = "forward" if start_node < end_node else "backward"
+        
+        if edge_key not in segment_usage:
+            segment_usage[edge_key] = {"forward": 0, "backward": 0}
+        
+        segment_usage[edge_key][direction] += 1
 
 
 def test_population_initializer():
