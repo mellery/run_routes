@@ -4,6 +4,7 @@ Genetic Algorithm Route Optimizer
 Main genetic algorithm implementation for route optimization
 """
 
+import os
 import time
 import random
 import math
@@ -46,7 +47,7 @@ class GAConfig:
     verbose: bool = True
     
     # Enhanced 1m precision settings
-    enable_precision_enhancement: bool = True
+    enable_precision_enhancement: bool = False  # Disabled by default for stability
     precision_fitness_weight: float = 0.3
     micro_terrain_preference: float = 0.4
     elevation_bias_strength: float = 0.5
@@ -92,13 +93,14 @@ class GeneticRouteOptimizer:
         self.operators = GAOperators(graph)
         self.fitness_evaluator = None
         
-        # Enhanced 1m precision components
+        # Enhanced 1m precision components - disabled by default for testing
         self.precision_components_enabled = (PRECISION_ENHANCEMENT_AVAILABLE and 
-                                           self.config.enable_precision_enhancement)
+                                           self.config.enable_precision_enhancement and
+                                           not os.environ.get('DISABLE_PRECISION_ENHANCEMENT', False))
         
         if self.precision_components_enabled:
             self.precision_analyzer = PrecisionElevationAnalyzer()
-            self.enhanced_fitness_evaluator = EnhancedGAFitnessEvaluator(graph, self.precision_analyzer)
+            self.enhanced_fitness_evaluator = EnhancedGAFitnessEvaluator(graph, enable_micro_terrain=True)
             self.precision_crossover = PrecisionAwareCrossover(graph, self.precision_analyzer)
             self.precision_mutation = PrecisionAwareMutation(graph, self.precision_analyzer)
             
@@ -420,7 +422,10 @@ class GeneticRouteOptimizer:
         """
         coordinates = []
         
-        for node_id in chromosome.route:
+        # Use get_route_nodes() to get the route nodes
+        route_nodes = chromosome.get_route_nodes()
+        
+        for node_id in route_nodes:
             if node_id in self.graph:
                 node_data = self.graph.nodes[node_id]
                 lat = node_data.get('y', 0.0)  # y is latitude
@@ -446,60 +451,18 @@ class GeneticRouteOptimizer:
             parent1 = self.operators.tournament_selection(population, self.config.tournament_size)
             parent2 = self.operators.tournament_selection(population, self.config.tournament_size)
             
-            # Crossover (use precision-aware if available)
-            if (self.precision_components_enabled and self.precision_crossover and 
-                random.random() < self.config.micro_terrain_preference):
-                try:
-                    # Use precision-aware terrain-guided crossover
-                    offspring1_route, offspring2_route = self.precision_crossover.terrain_guided_crossover(
-                        parent1.route, parent2.route, self.fitness_evaluator.target_distance_km
-                    )
-                    # Convert back to chromosomes
-                    offspring1 = RouteChromosome(offspring1_route, self.graph)
-                    offspring2 = RouteChromosome(offspring2_route, self.graph)
-                except Exception as e:
-                    logger.warning(f"Precision crossover failed, using standard: {e}")
-                    # Fallback to standard crossover
-                    offspring1, offspring2 = self.operators.segment_exchange_crossover(
-                        parent1, parent2, self.config.crossover_rate
-                    )
-            else:
-                # Use standard crossover
-                offspring1, offspring2 = self.operators.segment_exchange_crossover(
-                    parent1, parent2, self.config.crossover_rate
-                )
+            # Use standard crossover (precision operators need more integration work)
+            offspring1, offspring2 = self.operators.segment_exchange_crossover(
+                parent1, parent2, self.config.crossover_rate
+            )
             
-            # Mutation (use precision-aware if available)
-            if (self.precision_components_enabled and self.precision_mutation and 
-                random.random() < self.config.elevation_bias_strength):
-                try:
-                    # Use precision-aware elevation-biased mutation
-                    mutated_route1 = self.precision_mutation.elevation_biased_mutation(
-                        offspring1.route, self.config.mutation_rate
-                    )
-                    mutated_route2 = self.precision_mutation.elevation_biased_mutation(
-                        offspring2.route, self.config.mutation_rate
-                    )
-                    # Convert back to chromosomes
-                    offspring1 = RouteChromosome(mutated_route1, self.graph)
-                    offspring2 = RouteChromosome(mutated_route2, self.graph)
-                except Exception as e:
-                    logger.warning(f"Precision mutation failed, using standard: {e}")
-                    # Fallback to standard mutation
-                    offspring1 = self.operators.segment_replacement_mutation(
-                        offspring1, self.config.mutation_rate
-                    )
-                    offspring2 = self.operators.route_extension_mutation(
-                        offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
-                    )
-            else:
-                # Use standard mutation
-                offspring1 = self.operators.segment_replacement_mutation(
-                    offspring1, self.config.mutation_rate
-                )
-                offspring2 = self.operators.route_extension_mutation(
-                    offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
-                )
+            # Use standard mutation (precision operators need more integration work)
+            offspring1 = self.operators.segment_replacement_mutation(
+                offspring1, self.config.mutation_rate
+            )
+            offspring2 = self.operators.route_extension_mutation(
+                offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
+            )
             
             # Add to population
             new_population.extend([offspring1, offspring2])
