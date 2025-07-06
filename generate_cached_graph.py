@@ -9,9 +9,9 @@ import pickle
 import time
 import argparse
 import osmnx as ox
-from route import add_elevation_to_graph, add_elevation_to_edges, add_running_weights
+from route import add_elevation_to_graph, add_enhanced_elevation_to_graph, add_elevation_to_edges, add_running_weights
 
-def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None):
+def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None, use_enhanced_elevation=True):
     """
     Generate and cache a graph with elevation data
     
@@ -20,6 +20,7 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         radius_m: Network radius in meters
         network_type: OSMnx network type ('all', 'drive', 'walk', 'bike')
         cache_file: Optional custom cache filename
+        use_enhanced_elevation: Whether to use 3DEP elevation data when available
     
     Returns:
         Processed graph with elevation data
@@ -52,7 +53,10 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         print("\n2️⃣ Adding elevation data to graph nodes...")
         step_start = time.time()
         
-        graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
+        if use_enhanced_elevation:
+            graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif')
+        else:
+            graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
         
         step_time = time.time() - step_start
         print(f"   ✅ Added elevation data to all nodes ({step_time:.1f}s)")
@@ -87,7 +91,8 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
             'generated_at': time.time(),
             'nodes_count': len(graph.nodes),
             'edges_count': len(graph.edges),
-            'elevation_file': 'srtm_20_05.tif'
+            'elevation_file': 'srtm_20_05.tif',
+            'enhanced_elevation': use_enhanced_elevation
         }
         
         # Save graph and metadata
@@ -213,7 +218,23 @@ def main():
         help='Force regeneration even if cache exists'
     )
     
+    parser.add_argument(
+        '--enhanced-elevation', '-e',
+        action='store_true',
+        default=True,
+        help='Use enhanced 3DEP elevation data when available (default: True)'
+    )
+    
+    parser.add_argument(
+        '--no-enhanced-elevation',
+        action='store_true',
+        help='Disable enhanced elevation, use only SRTM data'
+    )
+    
     args = parser.parse_args()
+    
+    # Determine elevation mode
+    use_enhanced_elevation = args.enhanced_elevation and not args.no_enhanced_elevation
     
     # Christiansburg, VA coordinates
     center_point = (37.1299, -80.4094)
@@ -236,7 +257,7 @@ def main():
     
     # Generate new cache
     try:
-        generate_cached_graph(center_point, args.radius, args.network_type, cache_file)
+        generate_cached_graph(center_point, args.radius, args.network_type, cache_file, use_enhanced_elevation)
         print(f"\n🎯 Cache generation complete: {cache_file}")
         
     except Exception as e:

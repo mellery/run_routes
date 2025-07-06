@@ -30,34 +30,17 @@ class EnhancedElevationProfiler:
         self.verbose = verbose
         self._distance_cache = {}  # Cache for network distances
         
-        # Initialize elevation data manager
-        try:
-            self.elevation_manager = get_elevation_manager(elevation_config_path)
-            self.elevation_source = self.elevation_manager.get_elevation_source()
-            
-            if self.elevation_source and self.verbose:
-                source_info = self.elevation_source.get_source_info()
-                print(f"📊 Enhanced ElevationProfiler initialized:")
-                print(f"   Source: {source_info.get('type', 'Unknown')}")
-                print(f"   Resolution: {self.elevation_source.get_resolution()}m")
-                
-                # Show hybrid source details if applicable
-                if hasattr(self.elevation_source, 'get_stats'):
-                    stats = self.elevation_source.get_stats()
-                    if 'primary_percentage' in stats:
-                        print(f"   Using high-resolution data: {stats['primary_percentage']:.1f}% of queries")
-            elif not self.elevation_source and self.verbose:
-                print("⚠️ No elevation source available - using graph elevation data only")
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ Failed to initialize elevation manager: {e}")
-            self.elevation_manager = None
-            self.elevation_source = None
+        # Disable runtime elevation data manager to avoid recursion issues
+        # 3DEP elevation data is now pre-computed and stored in graph nodes during cache generation
+        self.elevation_manager = None
+        self.elevation_source = None
+        
+        if self.verbose:
+            print("📊 Enhanced ElevationProfiler initialized: using pre-computed graph elevation (includes 3DEP when available)")
     
     def generate_profile_data(self, route_result: Dict[str, Any], 
                             use_enhanced_elevation: bool = True,
-                            interpolate_points: bool = True) -> Dict[str, Any]:
+                            interpolate_points: bool = False) -> Dict[str, Any]:
         """Generate enhanced elevation profile data for a route
         
         Args:
@@ -76,7 +59,7 @@ class EnhancedElevationProfiler:
         # Extract coordinates and elevations
         coordinates = []
         elevations = []
-        distances = [0]  # Start at 0 distance
+        distances = []  # Will add 0 when we add first coordinate
         cumulative_distance = 0
         
         from route import haversine_distance
@@ -112,7 +95,10 @@ class EnhancedElevationProfiler:
                     elevations.append(data.get('elevation', 0))
                 
                 # Calculate cumulative distance using road network paths
-                if i > 0:
+                if i == 0:
+                    # First node starts at distance 0
+                    distances.append(0)
+                else:
                     prev_node = route[i-1]
                     segment_dist = self._get_network_distance(prev_node, node)
                     cumulative_distance += segment_dist
@@ -120,9 +106,20 @@ class EnhancedElevationProfiler:
         
         # Add interpolated points for smoother profiles if requested
         if interpolate_points and len(coordinates) > 1:
-            coordinates, elevations, distances = self._interpolate_route_points(
-                coordinates, elevations, distances, use_enhanced_elevation
-            )
+            try:
+                result = self._interpolate_route_points(
+                    coordinates, elevations, distances, use_enhanced_elevation
+                )
+                if isinstance(result, tuple) and len(result) == 3:
+                    coordinates, elevations, distances = result
+                else:
+                    # Skip interpolation if method doesn't return expected format
+                    pass
+            except Exception as e:
+                # Skip interpolation on error
+                if self.verbose:
+                    print(f"⚠️ Interpolation failed, skipping: {e}")
+                pass
         
         # Add return to start for complete loop
         if len(route) > 1:
@@ -130,6 +127,8 @@ class EnhancedElevationProfiler:
             cumulative_distance += return_dist
             distances.append(cumulative_distance)
             elevations.append(elevations[0])  # Back to start elevation
+            # Add coordinate for return point (same as start)
+            coordinates.append(coordinates[0])
         
         # Convert distances to kilometers
         distances_km = [d / 1000 for d in distances]
@@ -531,14 +530,8 @@ class EnhancedElevationProfiler:
             start_data = self.graph.nodes[route[0]]
             elevation = start_data.get('elevation', 0)
             
-            # Try to get enhanced elevation if available
-            if self.elevation_source:
-                try:
-                    enhanced_elevation = self.elevation_source.get_elevation(start_data['y'], start_data['x'])
-                    if enhanced_elevation is not None:
-                        elevation = enhanced_elevation
-                except Exception:
-                    pass  # Fall back to graph elevation
+            # Use graph elevation for detailed path to avoid slowdown
+            # Enhanced elevation lookup is disabled here for performance
             
             detailed_path.append({
                 'latitude': start_data['y'],
@@ -564,14 +557,7 @@ class EnhancedElevationProfiler:
                         node_data = self.graph.nodes[node_id]
                         elevation = node_data.get('elevation', 0)
                         
-                        # Try to get enhanced elevation if available
-                        if self.elevation_source:
-                            try:
-                                enhanced_elevation = self.elevation_source.get_elevation(node_data['y'], node_data['x'])
-                                if enhanced_elevation is not None:
-                                    elevation = enhanced_elevation
-                            except Exception:
-                                pass  # Fall back to graph elevation
+                        # Use graph elevation for performance (enhanced elevation disabled for detailed path)
                         
                         detailed_path.append({
                             'latitude': node_data['y'],
@@ -619,14 +605,7 @@ class EnhancedElevationProfiler:
                         node_data = self.graph.nodes[node_id]
                         elevation = node_data.get('elevation', 0)
                         
-                        # Try to get enhanced elevation if available
-                        if self.elevation_source:
-                            try:
-                                enhanced_elevation = self.elevation_source.get_elevation(node_data['y'], node_data['x'])
-                                if enhanced_elevation is not None:
-                                    elevation = enhanced_elevation
-                            except Exception:
-                                pass  # Fall back to graph elevation
+                        # Use graph elevation for performance (enhanced elevation disabled for detailed path)
                         
                         detailed_path.append({
                             'latitude': node_data['y'],
@@ -676,4 +655,4 @@ class ElevationProfiler(EnhancedElevationProfiler):
     
     def generate_profile_data(self, route_result: Dict[str, Any]) -> Dict[str, Any]:
         """Generate profile data with automatic enhancement"""
-        return super().generate_profile_data(route_result, use_enhanced_elevation=True, interpolate_points=True)
+        return super().generate_profile_data(route_result, use_enhanced_elevation=True, interpolate_points=False)

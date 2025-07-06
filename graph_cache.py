@@ -9,7 +9,7 @@ import subprocess
 import sys
 from generate_cached_graph import load_cached_graph, get_cache_filename, generate_cached_graph
 
-def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, network_type='all', force_regenerate=False):
+def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, network_type='all', force_regenerate=False, use_enhanced_elevation=True):
     """
     Load cached graph or generate if not available
     
@@ -18,6 +18,7 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
         radius_m: Network radius in meters
         network_type: OSMnx network type ('all', 'drive', 'walk', 'bike')
         force_regenerate: Force regeneration even if cache exists
+        use_enhanced_elevation: Whether to use 3DEP elevation data when available
         
     Returns:
         Graph with elevation data and running weights
@@ -37,7 +38,7 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
     print(f"   This may take a few minutes for the first time...")
     
     try:
-        graph = generate_cached_graph(center_point, radius_m, network_type, cache_file)
+        graph = generate_cached_graph(center_point, radius_m, network_type, cache_file, use_enhanced_elevation)
         return graph
         
     except Exception as e:
@@ -70,10 +71,13 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
         print("⚠️ Falling back to direct graph generation (will be slow)...")
         try:
             import osmnx as ox
-            from route import add_elevation_to_graph, add_elevation_to_edges, add_running_weights
+            from route import add_elevation_to_graph, add_enhanced_elevation_to_graph, add_elevation_to_edges, add_running_weights
             
             graph = ox.graph_from_point(center_point, dist=radius_m, network_type=network_type)
-            graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
+            if use_enhanced_elevation:
+                graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif')
+            else:
+                graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
             graph = add_elevation_to_edges(graph)
             graph = add_running_weights(graph)
             

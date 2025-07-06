@@ -3,6 +3,7 @@ import networkx as nx
 import osmnx as ox
 import numpy as np
 import rasterio
+import os
 from math import radians, cos, sin, asin, sqrt
 
 # Function to download street network data
@@ -108,6 +109,89 @@ def add_elevation_to_graph(graph, raster_path):
             graph.nodes[node_id]['elevation'] = 0.0
     
     print(f"Added elevation data to {nodes_with_elevation}/{len(graph.nodes)} nodes")
+    return graph
+
+def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif'):
+    """Add high-resolution elevation data to graph nodes using 3DEP when available
+    
+    Args:
+        graph: NetworkX graph
+        use_3dep: Whether to try using 3DEP data first
+        fallback_raster: SRTM raster file to use as fallback
+        
+    Returns:
+        Graph with enhanced elevation data
+    """
+    print("Adding enhanced elevation data to graph nodes...")
+    
+    elevation_manager = None
+    elevation_source = None
+    nodes_with_3dep = 0
+    nodes_with_srtm = 0
+    nodes_with_fallback = 0
+    
+    # Try to initialize 3DEP elevation source
+    if use_3dep:
+        try:
+            from elevation_data_sources import get_elevation_manager
+            elevation_manager = get_elevation_manager()
+            if elevation_manager:
+                available_sources = elevation_manager.get_available_sources()
+                if '3dep_local' in available_sources or '3dep' in available_sources:
+                    elevation_source = elevation_manager.get_elevation_source()
+                    print(f"   Using 3DEP 1m elevation data (primary)")
+                elif 'srtm' in available_sources:
+                    elevation_source = elevation_manager.get_elevation_source()
+                    print(f"   Using SRTM elevation data from manager")
+        except Exception as e:
+            print(f"   ⚠️ 3DEP initialization failed: {e}")
+            elevation_manager = None
+            elevation_source = None
+    
+    # Process all nodes
+    for node_id, node_data in graph.nodes(data=True):
+        lat = node_data['y']
+        lon = node_data['x']
+        elevation = None
+        
+        # Try 3DEP/enhanced source first
+        if elevation_source:
+            try:
+                elevation = elevation_source.get_elevation(lat, lon)
+                if elevation is not None:
+                    nodes_with_3dep += 1
+            except Exception:
+                elevation = None
+        
+        # Fallback to SRTM raster file if 3DEP failed
+        if elevation is None and fallback_raster and os.path.exists(fallback_raster):
+            elevation = get_elevation_from_raster(fallback_raster, lat, lon)
+            if elevation is not None:
+                nodes_with_srtm += 1
+        
+        # Final fallback to default elevation
+        if elevation is None:
+            elevation = 0.0
+            nodes_with_fallback += 1
+        
+        graph.nodes[node_id]['elevation'] = elevation
+    
+    # Clean up elevation manager
+    if elevation_manager:
+        try:
+            elevation_manager.close_all()
+        except Exception:
+            pass
+    
+    total_nodes = len(graph.nodes)
+    print(f"   ✅ Enhanced elevation added to {total_nodes} nodes:")
+    if nodes_with_3dep > 0:
+        print(f"      • 3DEP 1m data: {nodes_with_3dep} nodes ({nodes_with_3dep/total_nodes*100:.1f}%)")
+    if nodes_with_srtm > 0:
+        print(f"      • SRTM 90m data: {nodes_with_srtm} nodes ({nodes_with_srtm/total_nodes*100:.1f}%)")
+    if nodes_with_fallback > 0:
+        print(f"      • Default elevation: {nodes_with_fallback} nodes ({nodes_with_fallback/total_nodes*100:.1f}%)")
+    
     return graph
 
 # Function to calculate elevation gain/loss and add to edges

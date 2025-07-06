@@ -117,7 +117,7 @@ class GAFitnessEvaluator:
         # Connectivity component
         connectivity_score = self._calculate_connectivity_score(chromosome)
         
-        # Diversity component
+        # Diversity component (geographic spread + loop efficiency)
         diversity_score = self._calculate_diversity_score(chromosome)
         
         # Combine scores using weights
@@ -222,25 +222,66 @@ class GAFitnessEvaluator:
         if not chromosome.segments:
             return 0.0
         
-        # Direction diversity - variety of travel directions
-        directions = set()
+        # Geographic diversity - spread of route across different areas
+        # Measure the geographic spread of nodes visited
+        visited_nodes = set()
         for segment in chromosome.segments:
-            if segment.direction:
-                directions.add(segment.direction)
+            visited_nodes.add(segment.start_node)
+            visited_nodes.add(segment.end_node)
         
-        direction_diversity = len(directions) / 8.0  # 8 cardinal directions max
-        
-        # Segment length diversity - variety of segment lengths
-        if len(chromosome.segments) > 1:
-            segment_lengths = [seg.length for seg in chromosome.segments]
-            length_std = np.std(segment_lengths)
-            length_mean = np.mean(segment_lengths)
-            length_diversity = min(1.0, length_std / max(length_mean, 1.0))
+        if len(visited_nodes) <= 1:
+            geographic_diversity = 0.0
         else:
-            length_diversity = 0.0
+            # Calculate the geographic spread using coordinate variance
+            # This rewards routes that explore different areas rather than zigzagging
+            try:
+                import networkx as nx
+                graph = chromosome.segments[0].graph if chromosome.segments else None
+                if graph:
+                    latitudes = []
+                    longitudes = []
+                    for node in visited_nodes:
+                        if node in graph.nodes:
+                            node_data = graph.nodes[node]
+                            latitudes.append(node_data.get('y', 0))
+                            longitudes.append(node_data.get('x', 0))
+                    
+                    if len(latitudes) > 1:
+                        lat_std = np.std(latitudes)
+                        lon_std = np.std(longitudes)
+                        # Normalize by typical coordinate ranges (rough approximation)
+                        geographic_diversity = min(1.0, (lat_std + lon_std) * 1000)
+                    else:
+                        geographic_diversity = 0.0
+                else:
+                    geographic_diversity = 0.0
+            except:
+                # Fallback: use number of unique nodes as proxy for geographic spread
+                geographic_diversity = min(1.0, len(visited_nodes) / 20.0)
         
-        # Combine diversity components
-        diversity_score = (direction_diversity + length_diversity) / 2.0
+        # Loop efficiency - penalty for excessive backtracking
+        # Reward routes that don't repeat the same roads
+        if len(chromosome.segments) > 1:
+            edge_visits = {}
+            for segment in chromosome.segments:
+                # Count how many times we use each edge (in either direction)
+                edge_key = tuple(sorted([segment.start_node, segment.end_node]))
+                edge_visits[edge_key] = edge_visits.get(edge_key, 0) + 1
+            
+            # Calculate efficiency: penalize repeated edges
+            total_segments = len(chromosome.segments)
+            unique_edges = len(edge_visits)
+            repeat_penalty = sum(max(0, visits - 1) for visits in edge_visits.values())
+            
+            if total_segments > 0:
+                loop_efficiency = max(0.0, 1.0 - (repeat_penalty / total_segments))
+            else:
+                loop_efficiency = 1.0
+        else:
+            loop_efficiency = 1.0
+        
+        # Combine diversity components: geographic spread + loop efficiency
+        diversity_score = (geographic_diversity + loop_efficiency) / 2.0
         
         return diversity_score
     

@@ -590,8 +590,8 @@ class RefactoredCLIRoutePlanner:
         print(f"\n📈 Creating route visualization...")
         
         try:
-            # Generate elevation profile data
-            profile_data = elevation_profiler.generate_profile_data(route_result)
+            # Generate elevation profile data (disable interpolation to avoid errors)
+            profile_data = elevation_profiler.generate_profile_data(route_result, interpolate_points=False)
             
             if not profile_data:
                 print("❌ No profile data available")
