@@ -1,27 +1,52 @@
 #!/usr/bin/env python3
 """
-Refactored Command Line Route Planner
-Uses shared route services for consistent functionality
+Enhanced Command Line Route Planner with 3DEP Support
+Uses shared route services with enhanced 3DEP elevation integration
 """
 
 import argparse
 import sys
 import time
+import os
 from typing import List, Tuple
+
+# Add project root for elevation imports
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from route_services import (
     NetworkManager, RouteOptimizer, RouteAnalyzer, 
-    ElevationProfiler, RouteFormatter
+    RouteFormatter
 )
+
+# Import enhanced elevation profiler
+try:
+    from route_services.elevation_profiler_enhanced import EnhancedElevationProfiler
+    ENHANCED_ELEVATION_AVAILABLE = True
+except ImportError:
+    from route_services import ElevationProfiler
+    ENHANCED_ELEVATION_AVAILABLE = False
+
+# Import elevation data sources for configuration
+try:
+    from elevation_data_sources import get_elevation_manager, ElevationConfig
+    ELEVATION_SOURCES_AVAILABLE = True
+except ImportError:
+    ELEVATION_SOURCES_AVAILABLE = False
 
 
 class RefactoredCLIRoutePlanner:
-    """Refactored command line interface using shared route services"""
+    """Enhanced command line interface with 3DEP elevation support"""
     
-    def __init__(self):
-        """Initialize the CLI route planner"""
+    def __init__(self, elevation_config_path=None):
+        """Initialize the CLI route planner with enhanced elevation support
+        
+        Args:
+            elevation_config_path: Optional path to elevation configuration file
+        """
         self.services = None
         self.selected_start_node = 1529188403  # Default starting point
+        self.elevation_config_path = elevation_config_path
+        self.elevation_manager = None
         
     def initialize_services(self, center_point=None, radius_km=5.0):
         """Initialize all route services
@@ -44,12 +69,29 @@ class RefactoredCLIRoutePlanner:
                 print("❌ Failed to load street network")
                 return False
             
-            # Create all services
+            # Initialize elevation management
+            if ELEVATION_SOURCES_AVAILABLE:
+                try:
+                    self.elevation_manager = get_elevation_manager(self.elevation_config_path)
+                    elevation_source = self.elevation_manager.get_elevation_source()
+                    if elevation_source:
+                        print(f"📊 Enhanced elevation: {elevation_source.get_resolution()}m resolution available")
+                except Exception as e:
+                    print(f"⚠️ Enhanced elevation initialization failed: {e}")
+            
+            # Create all services with enhanced elevation support
+            route_optimizer = RouteOptimizer(graph, self.elevation_config_path)
+            
+            if ENHANCED_ELEVATION_AVAILABLE:
+                elevation_profiler = EnhancedElevationProfiler(graph, self.elevation_config_path)
+            else:
+                elevation_profiler = ElevationProfiler(graph)
+            
             self.services = {
                 'network_manager': network_manager,
-                'route_optimizer': RouteOptimizer(graph),
+                'route_optimizer': route_optimizer,
                 'route_analyzer': RouteAnalyzer(graph),
-                'elevation_profiler': ElevationProfiler(graph),
+                'elevation_profiler': elevation_profiler,
                 'route_formatter': RouteFormatter(),
                 'graph': graph
             }
@@ -374,6 +416,93 @@ class RefactoredCLIRoutePlanner:
             print(f"❌ Error in unconstrained solver: {e}")
             return None
     
+    def show_elevation_status(self):
+        """Show elevation data source status"""
+        if not ELEVATION_SOURCES_AVAILABLE:
+            print("❌ Enhanced elevation system not available")
+            return
+        
+        try:
+            if not self.elevation_manager:
+                self.elevation_manager = get_elevation_manager(self.elevation_config_path)
+            
+            print("\n📊 Elevation Data Source Status")
+            print("=" * 40)
+            
+            # Show available sources
+            available_sources = self.elevation_manager.get_available_sources()
+            print(f"Available sources: {available_sources}")
+            
+            # Show active source
+            active_source = self.elevation_manager.get_elevation_source()
+            if active_source:
+                source_info = active_source.get_source_info()
+                print(f"Active source: {source_info.get('type', 'Unknown')}")
+                print(f"Resolution: {active_source.get_resolution()}m")
+                
+                # Show coverage
+                bounds = active_source.get_coverage_bounds()
+                print(f"Coverage: {bounds}")
+                
+                # Show hybrid source statistics if available
+                if hasattr(active_source, 'get_stats'):
+                    stats = active_source.get_stats()
+                    if stats and 'primary_queries' in stats:
+                        total_queries = sum(stats[k] for k in ['primary_queries', 'fallback_queries', 'failed_queries'])
+                        if total_queries > 0:
+                            print(f"\nUsage Statistics:")
+                            print(f"  High-resolution queries: {stats['primary_percentage']:.1f}%")
+                            print(f"  Fallback queries: {stats['fallback_percentage']:.1f}%")
+                            print(f"  Failed queries: {stats['failure_percentage']:.1f}%")
+            else:
+                print("❌ No active elevation source")
+            
+            # Test elevation access
+            test_lat, test_lon = 37.1299, -80.4094  # Christiansburg, VA
+            test_results = self.elevation_manager.test_sources(test_lat, test_lon)
+            
+            print(f"\nElevation Test at ({test_lat}, {test_lon}):")
+            for source_name, result in test_results.items():
+                status = "✅" if result['available'] and result['elevation'] else "❌"
+                elevation = f"{result['elevation']:.1f}m" if result['elevation'] else "N/A"
+                resolution = f"{result['resolution']:.1f}m" if 'resolution' in result else "N/A"
+                print(f"  {status} {source_name}: {elevation} (res: {resolution})")
+            
+        except Exception as e:
+            print(f"❌ Failed to get elevation status: {e}")
+    
+    def configure_elevation_source(self, preferred_source=None):
+        """Configure elevation data source preferences
+        
+        Args:
+            preferred_source: Preferred source name ('3dep_local', 'srtm', 'hybrid')
+        """
+        if not ELEVATION_SOURCES_AVAILABLE:
+            print("❌ Enhanced elevation system not available")
+            return
+        
+        try:
+            # Create or load configuration
+            config = ElevationConfig()
+            if self.elevation_config_path and os.path.exists(self.elevation_config_path):
+                config = ElevationConfig.from_file(self.elevation_config_path)
+            
+            if preferred_source:
+                config.preferred_source = preferred_source
+                print(f"✅ Set preferred elevation source to: {preferred_source}")
+            
+            # Save configuration
+            config_path = self.elevation_config_path or "elevation_config.json"
+            config.to_file(config_path)
+            print(f"✅ Saved elevation configuration to: {config_path}")
+            
+            # Reinitialize elevation manager
+            self.elevation_manager = get_elevation_manager(config_path)
+            print("✅ Elevation configuration updated")
+            
+        except Exception as e:
+            print(f"❌ Failed to configure elevation source: {e}")
+    
     def display_route_stats(self, route_result):
         """Display route statistics using formatter
         
@@ -394,6 +523,19 @@ class RefactoredCLIRoutePlanner:
         # Format and display stats
         stats_output = route_formatter.format_route_stats_cli(route_result, analysis)
         print(stats_output)
+        
+        # Show enhanced elevation information if available
+        if hasattr(route_result, 'enhanced_profile') and route_result.get('enhanced_profile'):
+            print("\n📊 Enhanced Elevation Analysis:")
+            data_source = route_result.get('data_source_info', {})
+            if data_source:
+                print(f"   Data source: {data_source.get('active_source', 'Unknown')}")
+                print(f"   Resolution: {data_source.get('resolution_m', 'Unknown')}m")
+                
+                if 'usage_stats' in data_source:
+                    stats = data_source['usage_stats']
+                    if 'primary_percentage' in stats:
+                        print(f"   High-res coverage: {stats['primary_percentage']:.1f}%")
     
     def generate_directions(self, route_result):
         """Generate and display turn-by-turn directions

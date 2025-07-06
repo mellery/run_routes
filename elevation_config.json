@@ -1,0 +1,10 @@
+{
+  "preferred_source": "hybrid",
+  "fallback_enabled": true,
+  "cache_enabled": true,
+  "threedep_data_directory": "./elevation_data/3dep_1m",
+  "auto_rebuild_index": true,
+  "srtm_file_path": "srtm_38_03.tif",
+  "max_open_files": 10,
+  "enable_statistics": true
+}

@@ -276,11 +276,27 @@ class LocalThreeDEPSource(ElevationDataSource):
         covering_tiles = []
         
         for tile_path, tile_info in self.tile_index.items():
-            bounds = tile_info['bounds']  # [west, south, east, north]
-            
-            if (bounds[0] <= lon <= bounds[2] and 
-                bounds[1] <= lat <= bounds[3]):
-                covering_tiles.append(tile_path)
+            try:
+                # Get tile CRS and transform lat/lon to tile coordinates
+                tile_crs = tile_info.get('crs', 'EPSG:4326')
+                
+                if tile_crs != 'EPSG:4326':
+                    # Transform lat/lon to tile CRS
+                    import pyproj
+                    transformer = pyproj.Transformer.from_crs('EPSG:4326', tile_crs, always_xy=True)
+                    x, y = transformer.transform(lon, lat)
+                else:
+                    x, y = lon, lat
+                
+                bounds = tile_info['bounds']  # [west, south, east, north] in tile CRS
+                
+                if (bounds[0] <= x <= bounds[2] and 
+                    bounds[1] <= y <= bounds[3]):
+                    covering_tiles.append(tile_path)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to check coverage for tile {tile_path}: {e}")
+                continue
         
         return covering_tiles
     
@@ -321,8 +337,15 @@ class LocalThreeDEPSource(ElevationDataSource):
             if not src:
                 return None
             
-            # Sample elevation at coordinate
-            coords = [(lon, lat)]
+            # Transform coordinates to tile CRS if needed
+            if src.crs.to_string() != 'EPSG:4326':
+                import pyproj
+                transformer = pyproj.Transformer.from_crs('EPSG:4326', src.crs, always_xy=True)
+                x, y = transformer.transform(lon, lat)
+                coords = [(x, y)]
+            else:
+                coords = [(lon, lat)]
+            
             elevations = list(src.sample(coords))
             
             if elevations and len(elevations[0]) > 0:
@@ -499,7 +522,7 @@ class ElevationConfig:
         self.auto_rebuild_index = True
         
         # SRTM settings
-        self.srtm_file_path = "srtm_38_03.tif"
+        self.srtm_file_path = "srtm_20_05.tif"  # Use available SRTM file
         
         # Performance settings
         self.max_open_files = 10

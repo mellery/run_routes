@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
 """
-Route Optimizer
-Handles route optimization with automatic solver selection
+Route Optimizer with Enhanced 3DEP Elevation Integration
+Handles route optimization with automatic solver selection and 3DEP precision elevation
 """
 
 import time
+import os
+import sys
 from typing import Dict, Any, Optional
+
+# Add project root to path for elevation imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import networkx as nx
 
 # GA imports
@@ -16,21 +22,66 @@ try:
 except ImportError:
     GA_AVAILABLE = False
 
+# Enhanced elevation imports
+try:
+    from elevation_data_sources import get_elevation_manager, ElevationDataManager
+    ENHANCED_ELEVATION_AVAILABLE = True
+except ImportError:
+    ENHANCED_ELEVATION_AVAILABLE = False
+
 
 class RouteOptimizer:
     """Manages route optimization with solver fallbacks"""
     
-    def __init__(self, graph: nx.Graph):
-        """Initialize route optimizer
+    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None):
+        """Initialize route optimizer with enhanced elevation support
         
         Args:
             graph: NetworkX graph for route planning
+            elevation_config_path: Optional path to elevation configuration file
         """
         self.graph = graph
         self._optimizer_instance = None
         self._solver_type = None
         self._ga_optimizer = None
+        self._elevation_manager = None
+        self._elevation_source = None
+        
+        # Initialize enhanced elevation support
+        self._initialize_elevation(elevation_config_path)
         self._initialize_solver()
+    
+    def _initialize_elevation(self, elevation_config_path: Optional[str] = None):
+        """Initialize enhanced elevation data sources
+        
+        Args:
+            elevation_config_path: Optional path to elevation configuration file
+        """
+        if ENHANCED_ELEVATION_AVAILABLE:
+            try:
+                self._elevation_manager = get_elevation_manager(elevation_config_path)
+                self._elevation_source = self._elevation_manager.get_elevation_source()
+                
+                if self._elevation_source:
+                    source_info = self._elevation_source.get_source_info()
+                    print(f"📊 Enhanced elevation system initialized:")
+                    print(f"   Source: {source_info.get('type', 'Unknown')}")
+                    print(f"   Resolution: {self._elevation_source.get_resolution()}m")
+                    
+                    # Show hybrid source usage if applicable
+                    if hasattr(self._elevation_source, 'get_stats'):
+                        stats = self._elevation_source.get_stats()
+                        if stats and 'primary_percentage' in stats:
+                            print(f"   High-resolution coverage: Available for precision optimization")
+                else:
+                    print("⚠️ No elevation sources configured")
+                    
+            except Exception as e:
+                print(f"⚠️ Enhanced elevation initialization failed: {e}")
+                self._elevation_manager = None
+                self._elevation_source = None
+        else:
+            print("⚠️ Enhanced elevation system not available")
     
     def _initialize_solver(self):
         """Initialize the best available TSP solver and GA optimizer"""
