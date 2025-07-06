@@ -20,11 +20,12 @@ class ElevationProfiler:
         self.graph = graph
         self._distance_cache = {}  # Cache for network distances
     
-    def generate_profile_data(self, route_result: Dict[str, Any]) -> Dict[str, Any]:
+    def generate_profile_data(self, route_result: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Generate elevation profile data for a route
         
         Args:
             route_result: Route result from optimizer
+            **kwargs: Additional parameters (for compatibility with enhanced version)
             
         Returns:
             Dictionary with elevation profile data

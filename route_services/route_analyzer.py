@@ -200,16 +200,25 @@ class RouteAnalyzer:
         
         # Return to start
         if len(route) > 1:
-            total_distance = route_result.get('stats', {}).get('total_distance_km', cumulative_distance / 1000)
+            # Calculate distance from last node back to start
+            last_data = self.graph.nodes[route[-1]]
+            start_data = self.graph.nodes[route[0]]
+            
+            final_segment_dist = haversine_distance(
+                last_data['y'], last_data['x'],
+                start_data['y'], start_data['x']
+            )
+            cumulative_distance += final_segment_dist
+            
             directions.append({
                 'step': len(route) + 1,
                 'type': 'finish',
                 'instruction': "Return to starting point to complete the loop",
                 'node_id': route[0],
                 'elevation': directions[0]['elevation'],
-                'elevation_change': 0,
-                'distance_km': 0,
-                'cumulative_distance_km': total_distance,
+                'elevation_change': directions[0]['elevation'] - directions[-1]['elevation'],
+                'distance_km': final_segment_dist / 1000,
+                'cumulative_distance_km': cumulative_distance / 1000,
                 'terrain': 'finish'
             })
         
