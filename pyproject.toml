@@ -1,0 +1,134 @@
+[build-system]
+requires = ["setuptools>=45", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "running-route-optimizer"
+version = "1.0.0"
+description = "Optimized running route generator for Christiansburg, VA using OpenStreetMap data"
+authors = [
+    {name = "Route Optimizer Team", email = "noreply@example.com"}
+]
+license = {text = "MIT"}
+readme = "README.md"
+requires-python = ">=3.12"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: GIS",
+    "Topic :: Other/Nonlisted Topic",
+]
+
+dependencies = [
+    "osmnx>=1.9.0",
+    "networkx>=3.4.2",
+    "numpy>=2.2.1",
+    "matplotlib>=3.8.0",
+    "streamlit>=1.28.0",
+    "folium>=0.15.0",
+    "plotly>=5.17.0",
+    "pandas>=2.1.0",
+    "streamlit-folium>=0.15.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-cov>=6.2.0",
+    "coverage>=7.9.0",
+]
+
+test = [
+    "pytest>=8.4.0",
+    "pytest-cov>=6.2.0",
+    "coverage>=7.9.0",
+]
+
+[project.scripts]
+route-optimizer = "cli_route_planner:main"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--disable-warnings",
+    "--cov=route_services",
+    "--cov=ga_chromosome",
+    "--cov=ga_population", 
+    "--cov=ga_operators",
+    "--cov=ga_fitness",
+    "--cov=genetic_route_optimizer",
+    "--cov=ga_visualizer",
+    "--cov=ga_parameter_tuning",
+    "--cov=ga_performance",
+    "--cov=route",
+    "--cov=tsp_solver",
+    "--cov=tsp_solver_fast",
+    "--cov=graph_cache",
+    "--cov-report=html:htmlcov",
+    "--cov-report=term-missing",
+    "--cov-report=xml:coverage.xml",
+    "--cov-branch",
+    "--cov-fail-under=85"
+]
+markers = [
+    "unit: Unit tests (fast, mocked dependencies)",
+    "integration: Integration tests (slower, real dependencies)",
+    "benchmark: Performance benchmark tests",
+    "ga: Genetic algorithm specific tests",
+    "slow: Tests that take longer to run"
+]
+
+[tool.coverage.run]
+source = ["."]
+omit = [
+    "*/venv/*",
+    "*/tests/*",
+    "*/test_*",
+    "setup.py",
+    "setup_cache.py",
+    "manual_*.py",
+    "quick_*.py",
+    "footway_visualization.py",
+    "osm_tag_analyzer.py",
+    "test_coverage_analysis.py",
+    "*_original.py",
+    "week6_development_test.py",
+    "ga_development_test.py",
+    "*/htmlcov/*",
+    "*/cache/*",
+    "*/srtm_data/*"
+]
+branch = true
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if self.debug:",
+    "if settings.DEBUG",
+    "raise AssertionError",
+    "raise NotImplementedError",
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "class .*\\bProtocol\\):",
+    "@(abc\\.)?abstractmethod"
+]
+show_missing = true
+skip_covered = false
+skip_empty = true
+
+[tool.coverage.html]
+directory = "htmlcov"
+title = "Running Route Optimizer - Test Coverage Report"
+
+[tool.coverage.xml]
+output = "coverage.xml"

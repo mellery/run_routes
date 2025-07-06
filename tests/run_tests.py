@@ -260,6 +260,62 @@ def run_benchmark_tests():
         return None
 
 
+def run_coverage_tests():
+    """Run tests with coverage reporting using pytest-cov"""
+    print("📊 Running Tests with Coverage")
+    print("=" * 50)
+    
+    missing_deps = check_dependencies()
+    if missing_deps:
+        print(f"❌ Missing dependencies: {', '.join(missing_deps)}")
+        print("📋 Install with: pip install networkx osmnx numpy matplotlib pandas pytest-cov")
+        return None
+    
+    try:
+        import subprocess
+        
+        # Run pytest with coverage
+        cmd = [
+            "python", "-m", "pytest",
+            "tests/unit",  # Focus on unit tests for coverage
+            "--cov=route_services",
+            "--cov=ga_chromosome", 
+            "--cov=ga_population",
+            "--cov=ga_operators",
+            "--cov=ga_fitness",
+            "--cov=genetic_route_optimizer",
+            "--cov=ga_visualizer",
+            "--cov=ga_parameter_tuning",
+            "--cov=ga_performance",
+            "--cov=route",
+            "--cov=tsp_solver",
+            "--cov=tsp_solver_fast",
+            "--cov=graph_cache",
+            "--cov-report=html:htmlcov",
+            "--cov-report=xml:coverage.xml",
+            "--cov-report=term-missing",
+            "--cov-branch",
+            "--cov-fail-under=80",
+            "-v"
+        ]
+        
+        print(f"Running: {' '.join(cmd)}")
+        result = subprocess.run(cmd, cwd=os.path.dirname(os.path.dirname(__file__)))
+        
+        if result.returncode == 0:
+            print("✅ Coverage tests completed successfully")
+            print("📊 Coverage report generated: htmlcov/index.html")
+            print("📈 Coverage XML generated: coverage.xml")
+            return True
+        else:
+            print(f"❌ Coverage tests failed with exit code: {result.returncode}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Error running coverage tests: {e}")
+        return False
+
+
 def main():
     """Main test runner"""
     print("🚀 Route Services Test Runner")
@@ -326,8 +382,17 @@ def main():
         else:
             all_success = False
     
-    if test_type not in ['unit', 'ga', 'integration', 'ga-integration', 'benchmark', 'smoke', 'all']:
-        print("Usage: python run_tests.py [unit|ga|integration|ga-integration|benchmark|smoke|all]")
+    if test_type in ['coverage']:
+        # Run tests with coverage reporting
+        success = run_coverage_tests()
+        all_success = all_success and success
+        if success:
+            print("✅ Coverage tests completed - view htmlcov/index.html for detailed report")
+        else:
+            print("❌ Coverage tests failed")
+    
+    if test_type not in ['unit', 'ga', 'integration', 'ga-integration', 'benchmark', 'smoke', 'coverage', 'all']:
+        print("Usage: python run_tests.py [unit|ga|integration|ga-integration|benchmark|smoke|coverage|all]")
         print("\nTest types:")
         print("  unit           - Run unit tests (mocked, fast)")
         print("  ga             - Run GA tests (genetic algorithm components)")
@@ -335,6 +400,7 @@ def main():
         print("  ga-integration - Run GA integration tests (real dependencies)")
         print("  benchmark      - Run benchmark tests (GA vs TSP performance)")
         print("  smoke          - Run smoke tests (real dependencies, slower)")
+        print("  coverage       - Run tests with coverage reporting (pytest-cov)")
         print("  all            - Run all available tests")
         print("\nDefault: unit")
         return
