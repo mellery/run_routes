@@ -273,6 +273,17 @@ source venv/bin/activate && pip list
 
 # Install new packages (if needed)
 source venv/bin/activate && pip install <package_name>
+
+# === COVERAGE REPORTING ===
+# Generate detailed test coverage reports with pytest-cov
+python tests/run_tests.py coverage        # Run tests with coverage reporting
+python generate_coverage_badge.py         # Generate coverage badges and summary
+
+# Coverage artifacts generated:
+# - htmlcov/index.html: Detailed HTML coverage report
+# - coverage.xml: XML coverage data
+# - coverage_badges.md: Badge markdown for documentation
+# - coverage_data.json: JSON coverage data
 ```
 
 **Key Features Completed:**

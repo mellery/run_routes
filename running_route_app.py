@@ -293,17 +293,25 @@ def main():
     selected_objective_name = st.sidebar.selectbox(
         "Route Objective",
         options=list(objectives.keys()),
-        index=0,
+        index=1,  # Default to "Maximum Elevation Gain"
         help="Choose optimization strategy"
     )
     selected_objective = objectives[selected_objective_name]
     
     # Algorithm selection
     algorithms = route_optimizer.get_available_algorithms()
+    
+    # Find genetic algorithm index, fallback to auto, then nearest_neighbor
+    default_algorithm_index = 0
+    if "genetic" in algorithms:
+        default_algorithm_index = algorithms.index("genetic")
+    elif "auto" in algorithms:
+        default_algorithm_index = algorithms.index("auto")
+    
     algorithm = st.sidebar.selectbox(
         "Algorithm",
         options=algorithms,
-        index=0,
+        index=default_algorithm_index,  # Default to genetic if available
         help="Auto: Automatic selection • Nearest Neighbor: Fast TSP • Genetic: Advanced optimization"
     )
     

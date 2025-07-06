@@ -173,7 +173,7 @@ class RefactoredCLIRoutePlanner:
                 print("\n⏹️ Selection cancelled")
                 return None
     
-    def generate_route(self, start_node, target_distance, objective=None, algorithm="nearest_neighbor", exclude_footways=True):
+    def generate_route(self, start_node, target_distance, objective=None, algorithm="genetic", exclude_footways=True):
         """Generate optimized route using route services
         
         Args:
@@ -198,7 +198,7 @@ class RefactoredCLIRoutePlanner:
         
         # Use default objective if not provided
         if objective is None:
-            objective = route_optimizer.RouteObjective.MINIMIZE_DISTANCE
+            objective = route_optimizer.RouteObjective.MAXIMIZE_ELEVATION
         
         # Generate route
         result = route_optimizer.optimize_route(
@@ -818,15 +818,15 @@ def interactive_mode():
                     for i, (name, _) in enumerate(obj_list, 1):
                         print(f"{i}. {name}")
                     
-                    obj_input = input("Select objective (1-4) [1]: ").strip()
+                    obj_input = input("Select objective (1-4) [2]: ").strip()
                     try:
-                        obj_choice = int(obj_input) if obj_input else 1
+                        obj_choice = int(obj_input) if obj_input else 2
                         if 1 <= obj_choice <= len(obj_list):
                             objective = obj_list[obj_choice - 1][1]
                         else:
-                            objective = obj_list[0][1]  # Default
+                            objective = obj_list[1][1]  # Default to Maximum Elevation Gain
                     except ValueError:
-                        objective = obj_list[0][1]  # Default
+                        objective = obj_list[1][1]  # Default to Maximum Elevation Gain
                     
                     # Get algorithm
                     print("\nAlgorithm options:")
@@ -860,12 +860,20 @@ def interactive_mode():
                     algo_map[option_num] = "unconstrained"
                     algo_options.append("unconstrained")
                     
-                    algo_input = input(f"Select algorithm (1-{len(algo_map)}) [1]: ").strip()
+                    # Find genetic algorithm option number for default
+                    genetic_option = None
+                    for option_num, algo in algo_map.items():
+                        if algo == "genetic":
+                            genetic_option = option_num
+                            break
+                    
+                    default_option = genetic_option if genetic_option else 1
+                    algo_input = input(f"Select algorithm (1-{len(algo_map)}) [{default_option}]: ").strip()
                     try:
-                        algo_choice = int(algo_input) if algo_input else 1
-                        algorithm = algo_map.get(algo_choice, "auto" if "auto" in available_algorithms else "nearest_neighbor")
+                        algo_choice = int(algo_input) if algo_input else default_option
+                        algorithm = algo_map.get(algo_choice, "genetic" if "genetic" in available_algorithms else "auto" if "auto" in available_algorithms else "nearest_neighbor")
                     except ValueError:
-                        algorithm = "auto" if "auto" in available_algorithms else "nearest_neighbor"
+                        algorithm = "genetic" if "genetic" in available_algorithms else "auto" if "auto" in available_algorithms else "nearest_neighbor"
                     
                     # Ask about footway inclusion
                     footway_input = input("\nInclude footways/sidewalks? (can cause redundant back-and-forth routes) (y/n) [n]: ").strip().lower()
