@@ -16,9 +16,15 @@ import json
 import logging
 import hashlib
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - only set up if not already configured
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(name)s:%(levelname)s:%(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 try:
     import numpy as np
@@ -407,7 +413,7 @@ class EnhancedElevationCacheManager:
         self.total_query_time = 0
         self.lock = threading.RLock()
         
-        logger.info("Enhanced elevation cache manager initialized")
+        logger.debug("Enhanced elevation cache manager initialized")
     
     def get_elevation_cached(self, lat: float, lon: float, source) -> Optional[float]:
         """Get elevation with full caching pipeline"""

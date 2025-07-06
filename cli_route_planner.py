@@ -62,8 +62,8 @@ class RefactoredCLIRoutePlanner:
         try:
             print("🌐 Initializing route planning services...")
             
-            # Create network manager and load graph
-            network_manager = NetworkManager(center_point)
+            # Create network manager and load graph (suppress duplicate message)
+            network_manager = NetworkManager(center_point, verbose=False)
             graph = network_manager.load_network(radius_km)
             
             if not graph:
@@ -80,11 +80,11 @@ class RefactoredCLIRoutePlanner:
                 except Exception as e:
                     print(f"⚠️ Enhanced elevation initialization failed: {e}")
             
-            # Create all services with enhanced elevation support
-            route_optimizer = RouteOptimizer(graph, self.elevation_config_path)
+            # Create all services with enhanced elevation support (suppress duplicate messages)
+            route_optimizer = RouteOptimizer(graph, self.elevation_config_path, verbose=False)
             
             if ENHANCED_ELEVATION_AVAILABLE:
-                elevation_profiler = EnhancedElevationProfiler(graph, self.elevation_config_path)
+                elevation_profiler = EnhancedElevationProfiler(graph, self.elevation_config_path, verbose=False)
             else:
                 elevation_profiler = ElevationProfiler(graph)
             

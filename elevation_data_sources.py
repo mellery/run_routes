@@ -12,9 +12,15 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union, Any
 import logging
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
+# Configure logging - only set up if not already configured
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    handler.setLevel(logging.INFO)
+    formatter = logging.Formatter('%(name)s:%(levelname)s:%(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+    logger.setLevel(logging.INFO)
 
 try:
     import numpy as np
@@ -136,7 +142,7 @@ class SRTMElevationSource(ElevationDataSource):
         try:
             self._dataset = rasterio.open(self.srtm_file_path)
             self._bounds = self._dataset.bounds
-            logger.info(f"SRTM dataset initialized: {self.srtm_file_path}")
+            logger.debug(f"SRTM dataset initialized: {self.srtm_file_path}")
         except Exception as e:
             logger.error(f"Failed to initialize SRTM dataset: {e}")
     
@@ -241,7 +247,7 @@ class LocalThreeDEPSource(ElevationDataSource):
                 if os.path.exists(tile_path):
                     self.cache_manager.index_tile(tile_path)
             
-            logger.info(f"Enhanced caching initialized for {len(self.tile_index)} tiles")
+            logger.debug(f"Enhanced caching initialized for {len(self.tile_index)} tiles")
             
         except ImportError:
             logger.warning("Enhanced caching not available - elevation_cache_manager not found")
@@ -258,7 +264,7 @@ class LocalThreeDEPSource(ElevationDataSource):
             try:
                 with open(index_file, 'r') as f:
                     self.tile_index = json.load(f)
-                logger.info(f"Loaded tile index with {len(self.tile_index)} tiles")
+                logger.debug(f"Loaded tile index with {len(self.tile_index)} tiles")
             except Exception as e:
                 logger.warning(f"Failed to load tile index: {e}")
                 self._rebuild_tile_index()
@@ -621,10 +627,11 @@ class ElevationConfig:
 class ElevationDataManager:
     """Manager for elevation data sources"""
     
-    def __init__(self, config: Optional[ElevationConfig] = None):
+    def __init__(self, config: Optional[ElevationConfig] = None, verbose: bool = True):
         self.config = config or ElevationConfig()
         self.sources = {}
         self.active_source = None
+        self.verbose = verbose
         
         self._initialize_sources()
     
@@ -635,7 +642,7 @@ class ElevationDataManager:
         try:
             if os.path.exists(self.config.srtm_file_path):
                 self.sources['srtm'] = SRTMElevationSource(self.config.srtm_file_path)
-                logger.info("SRTM elevation source initialized")
+                logger.debug("SRTM elevation source initialized")
             else:
                 logger.warning(f"SRTM file not found: {self.config.srtm_file_path}")
         except Exception as e:
@@ -649,7 +656,7 @@ class ElevationDataManager:
                 
                 if tile_info['tile_count'] > 0:
                     self.sources['3dep_local'] = local_3dep
-                    logger.info(f"Local 3DEP source initialized with {tile_info['tile_count']} tiles")
+                    logger.debug(f"Local 3DEP source initialized with {tile_info['tile_count']} tiles")
                 else:
                     logger.warning("No 3DEP tiles found. Run setup_3dep_data.py to download tiles.")
                     
@@ -742,9 +749,14 @@ class ElevationDataManager:
             self.active_source.close()
 
 
+# Global elevation manager instance for singleton pattern
+_global_elevation_manager = None
+_global_config_path = None
+_global_manager_initialized = False
+
 # Convenience function for easy access
 def get_elevation_manager(config_path: Optional[str] = None) -> ElevationDataManager:
-    """Get configured elevation data manager
+    """Get configured elevation data manager (singleton pattern)
     
     Args:
         config_path: Optional path to configuration file
@@ -752,12 +764,24 @@ def get_elevation_manager(config_path: Optional[str] = None) -> ElevationDataMan
     Returns:
         Configured ElevationDataManager instance
     """
+    global _global_elevation_manager, _global_config_path, _global_manager_initialized
+    
+    # Return existing instance if config hasn't changed
+    if _global_elevation_manager is not None and _global_config_path == config_path:
+        return _global_elevation_manager
+    
+    # Create new instance (only show initialization messages on first creation)
     if config_path and os.path.exists(config_path):
         config = ElevationConfig.from_file(config_path)
     else:
         config = ElevationConfig()
     
-    return ElevationDataManager(config)
+    verbose = not _global_manager_initialized
+    _global_elevation_manager = ElevationDataManager(config, verbose=verbose)
+    _global_config_path = config_path
+    _global_manager_initialized = True
+    
+    return _global_elevation_manager
 
 
 if __name__ == "__main__":

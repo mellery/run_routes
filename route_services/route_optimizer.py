@@ -33,14 +33,16 @@ except ImportError:
 class RouteOptimizer:
     """Manages route optimization with solver fallbacks"""
     
-    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None):
+    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None, verbose: bool = True):
         """Initialize route optimizer with enhanced elevation support
         
         Args:
             graph: NetworkX graph for route planning
             elevation_config_path: Optional path to elevation configuration file
+            verbose: Whether to show initialization messages
         """
         self.graph = graph
+        self.verbose = verbose
         self._optimizer_instance = None
         self._solver_type = None
         self._ga_optimizer = None
@@ -62,7 +64,7 @@ class RouteOptimizer:
                 self._elevation_manager = get_elevation_manager(elevation_config_path)
                 self._elevation_source = self._elevation_manager.get_elevation_source()
                 
-                if self._elevation_source:
+                if self._elevation_source and self.verbose:
                     source_info = self._elevation_source.get_source_info()
                     print(f"📊 Enhanced elevation system initialized:")
                     print(f"   Source: {source_info.get('type', 'Unknown')}")
@@ -73,15 +75,17 @@ class RouteOptimizer:
                         stats = self._elevation_source.get_stats()
                         if stats and 'primary_percentage' in stats:
                             print(f"   High-resolution coverage: Available for precision optimization")
-                else:
+                elif not self._elevation_source and self.verbose:
                     print("⚠️ No elevation sources configured")
                     
             except Exception as e:
-                print(f"⚠️ Enhanced elevation initialization failed: {e}")
+                if self.verbose:
+                    print(f"⚠️ Enhanced elevation initialization failed: {e}")
                 self._elevation_manager = None
                 self._elevation_source = None
         else:
-            print("⚠️ Enhanced elevation system not available")
+            if self.verbose:
+                print("⚠️ Enhanced elevation system not available")
     
     def _initialize_solver(self):
         """Initialize the best available TSP solver and GA optimizer"""
@@ -91,7 +95,8 @@ class RouteOptimizer:
             self._optimizer_class = FastRunningRouteOptimizer
             self._route_objective = RouteObjective
             self._solver_type = "fast"
-            print("✅ Using fast TSP solver (no distance matrix precomputation)")
+            if self.verbose:
+                print("✅ Using fast TSP solver (no distance matrix precomputation)")
         except ImportError:
             try:
                 from tsp_solver import RunningRouteOptimizer
@@ -99,7 +104,8 @@ class RouteOptimizer:
                 self._optimizer_class = RunningRouteOptimizer
                 self._route_objective = RouteObjective
                 self._solver_type = "standard"
-                print("⚠️ Using standard TSP solver (with distance matrix)")
+                if self.verbose:
+                    print("⚠️ Using standard TSP solver (with distance matrix)")
             except ImportError:
                 raise ImportError("No TSP solver available. Please check tsp_solver modules.")
         
@@ -255,7 +261,8 @@ class RouteOptimizer:
             else:
                 return "nearest_neighbor"
         elif algorithm == "genetic" and not GA_AVAILABLE:
-            print("⚠️ GA not available, falling back to nearest_neighbor")
+            if self.verbose:
+                print("⚠️ GA not available, falling back to nearest_neighbor")
             return "nearest_neighbor"
         else:
             return algorithm
@@ -272,7 +279,8 @@ class RouteOptimizer:
             Route result dictionary or None if optimization fails
         """
         if not self._ga_optimizer:
-            print("❌ GA optimizer not available")
+            if self.verbose:
+                print("❌ GA optimizer not available")
             return None
         
         # Filter graph if needed
@@ -301,7 +309,8 @@ class RouteOptimizer:
         solve_time = time.time() - start_time
         
         if ga_results and ga_results.best_chromosome:
-            print(f"✅ GA route generated in {solve_time:.2f} seconds")
+            if self.verbose:
+                print(f"✅ GA route generated in {solve_time:.2f} seconds")
             
             # Convert GA results to standard format
             result = self._convert_ga_results_to_standard(ga_results, objective)
@@ -318,7 +327,8 @@ class RouteOptimizer:
             
             return result
         else:
-            print("❌ GA optimization returned no result")
+            if self.verbose:
+                print("❌ GA optimization returned no result")
             return None
     
     def _optimize_tsp(self, start_node: int, target_distance_km: float, 

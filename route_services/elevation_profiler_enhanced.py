@@ -18,14 +18,16 @@ from elevation_data_sources import get_elevation_manager, ElevationDataManager
 class EnhancedElevationProfiler:
     """Enhanced elevation profiler with 3DEP 1m resolution support"""
     
-    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None):
+    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None, verbose: bool = True):
         """Initialize enhanced elevation profiler
         
         Args:
             graph: NetworkX graph with elevation data
             elevation_config_path: Optional path to elevation configuration file
+            verbose: Whether to show initialization messages
         """
         self.graph = graph
+        self.verbose = verbose
         self._distance_cache = {}  # Cache for network distances
         
         # Initialize elevation data manager
@@ -33,7 +35,7 @@ class EnhancedElevationProfiler:
             self.elevation_manager = get_elevation_manager(elevation_config_path)
             self.elevation_source = self.elevation_manager.get_elevation_source()
             
-            if self.elevation_source:
+            if self.elevation_source and self.verbose:
                 source_info = self.elevation_source.get_source_info()
                 print(f"📊 Enhanced ElevationProfiler initialized:")
                 print(f"   Source: {source_info.get('type', 'Unknown')}")
@@ -44,11 +46,12 @@ class EnhancedElevationProfiler:
                     stats = self.elevation_source.get_stats()
                     if 'primary_percentage' in stats:
                         print(f"   Using high-resolution data: {stats['primary_percentage']:.1f}% of queries")
-            else:
+            elif not self.elevation_source and self.verbose:
                 print("⚠️ No elevation source available - using graph elevation data only")
                 
         except Exception as e:
-            print(f"⚠️ Failed to initialize elevation manager: {e}")
+            if self.verbose:
+                print(f"⚠️ Failed to initialize elevation manager: {e}")
             self.elevation_manager = None
             self.elevation_source = None
     

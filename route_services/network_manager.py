@@ -17,13 +17,15 @@ class NetworkManager:
     DEFAULT_NETWORK_TYPE = 'all'
     DEFAULT_START_NODE = 1529188403  # Downtown Christiansburg intersection
     
-    def __init__(self, center_point: Optional[Tuple[float, float]] = None):
+    def __init__(self, center_point: Optional[Tuple[float, float]] = None, verbose: bool = True):
         """Initialize network manager
         
         Args:
             center_point: (lat, lon) tuple for network center
+            verbose: Whether to show loading messages
         """
         self.center_point = center_point or self.DEFAULT_CENTER_POINT
+        self.verbose = verbose
         self._graph_cache = {}
         
     def load_network(self, radius_km: float = None, network_type: str = None) -> Optional[nx.Graph]:
@@ -60,16 +62,19 @@ class NetworkManager:
             )
             
             if graph:
-                print(f"✅ Loaded {len(graph.nodes)} intersections and {len(graph.edges)} road segments")
+                if self.verbose:
+                    print(f"✅ Loaded {len(graph.nodes)} intersections and {len(graph.edges)} road segments")
                 # Cache the loaded graph
                 self._graph_cache[cache_key] = graph
                 return graph
             else:
-                print("❌ Failed to load network")
+                if self.verbose:
+                    print("❌ Failed to load network")
                 return None
                 
         except Exception as e:
-            print(f"❌ Failed to load network: {e}")
+            if self.verbose:
+                print(f"❌ Failed to load network: {e}")
             return None
     
     def get_network_stats(self, graph: nx.Graph) -> dict:
