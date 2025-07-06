@@ -315,6 +315,13 @@ def main():
     elif algorithm == "nearest_neighbor":
         st.sidebar.info("⚡ Nearest Neighbor: Fast and reliable for distance-focused routes")
     
+    # Footway filtering option
+    exclude_footways = st.sidebar.checkbox(
+        "Exclude footways/sidewalks",
+        value=True,
+        help="Prevents redundant back-and-forth routes on parallel sidewalks and roads. Recommended for most users."
+    )
+    
     # Difficulty level info
     st.sidebar.markdown("### Difficulty Levels")
     st.sidebar.markdown("""
@@ -376,7 +383,8 @@ def main():
                         start_node=start_node,
                         target_distance_km=target_distance,
                         objective=selected_objective,
-                        algorithm=algorithm
+                        algorithm=algorithm,
+                        exclude_footways=exclude_footways
                     )
                     
                     if result:

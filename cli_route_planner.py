@@ -173,7 +173,7 @@ class RefactoredCLIRoutePlanner:
                 print("\n⏹️ Selection cancelled")
                 return None
     
-    def generate_route(self, start_node, target_distance, objective=None, algorithm="nearest_neighbor"):
+    def generate_route(self, start_node, target_distance, objective=None, algorithm="nearest_neighbor", exclude_footways=True):
         """Generate optimized route using route services
         
         Args:
@@ -181,6 +181,7 @@ class RefactoredCLIRoutePlanner:
             target_distance: Target distance in km
             objective: Route objective
             algorithm: Algorithm to use ('nearest_neighbor', 'genetic', 'unconstrained')
+            exclude_footways: Whether to exclude footway/sidewalk segments (default True)
             
         Returns:
             Route result dictionary or None
@@ -204,7 +205,8 @@ class RefactoredCLIRoutePlanner:
             start_node=start_node,
             target_distance_km=target_distance,
             objective=objective,
-            algorithm=algorithm
+            algorithm=algorithm,
+            exclude_footways=exclude_footways
         )
         
         if result:
@@ -865,6 +867,10 @@ def interactive_mode():
                     except ValueError:
                         algorithm = "auto" if "auto" in available_algorithms else "nearest_neighbor"
                     
+                    # Ask about footway inclusion
+                    footway_input = input("\nInclude footways/sidewalks? (can cause redundant back-and-forth routes) (y/n) [n]: ").strip().lower()
+                    exclude_footways = footway_input not in ['y', 'yes']
+                    
                     # Check if we need to expand network for larger routes
                     if target_distance > 8.0:  # For routes > 8km
                         required_radius = min(target_distance * 0.8, 25.0)  # 80% of distance, max 25km
@@ -875,7 +881,7 @@ def interactive_mode():
                             continue
                     
                     # Generate route
-                    result = planner.generate_route(start_node, target_distance, objective, algorithm)
+                    result = planner.generate_route(start_node, target_distance, objective, algorithm, exclude_footways)
                     
                     if result:
                         planner.display_route_stats(result)
@@ -971,6 +977,12 @@ def main():
         help='Algorithm to use (auto = automatic selection, unconstrained = shortest-path distances)'
     )
     
+    parser.add_argument(
+        '--include-footways',
+        action='store_true',
+        help='Include footway/sidewalk segments (default is to exclude them to avoid redundant paths)'
+    )
+    
     args = parser.parse_args()
     
     if args.interactive or (not args.start_node and not args.distance):
@@ -1000,7 +1012,8 @@ def main():
         
         result = planner.generate_route(
             args.start_node, args.distance, 
-            obj_map[args.objective], args.algorithm
+            obj_map[args.objective], args.algorithm,
+            exclude_footways=not args.include_footways
         )
         
         if result:

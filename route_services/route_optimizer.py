@@ -70,7 +70,8 @@ class RouteOptimizer:
         return self._solver_type
     
     def optimize_route(self, start_node: int, target_distance_km: float,
-                      objective: str = None, algorithm: str = "auto") -> Optional[Dict[str, Any]]:
+                      objective: str = None, algorithm: str = "auto", 
+                      exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
         """Generate optimized route
         
         Args:
@@ -78,6 +79,7 @@ class RouteOptimizer:
             target_distance_km: Target route distance in kilometers
             objective: Route objective (from RouteObjective enum)
             algorithm: Algorithm to use ('nearest_neighbor', 'genetic', or 'auto')
+            exclude_footways: Whether to exclude footway segments (default True)
             
         Returns:
             Route result dictionary or None if optimization fails
@@ -107,13 +109,14 @@ class RouteOptimizer:
         print(f"   Objective: {objective}")
         print(f"   Algorithm: {selected_algorithm}")
         print(f"   Solver: {self._solver_type}")
+        print(f"   Exclude footways: {exclude_footways}")
         
         try:
             # Route to appropriate optimization method
             if selected_algorithm == "genetic":
-                return self._optimize_genetic(start_node, target_distance_km, objective)
+                return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways)
             else:
-                return self._optimize_tsp(start_node, target_distance_km, objective, selected_algorithm)
+                return self._optimize_tsp(start_node, target_distance_km, objective, selected_algorithm, exclude_footways)
                 
         except Exception as e:
             print(f"❌ Route generation failed: {e}")
@@ -206,7 +209,7 @@ class RouteOptimizer:
         else:
             return algorithm
     
-    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str) -> Optional[Dict[str, Any]]:
+    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str, exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
         """Optimize route using genetic algorithm
         
         Args:
@@ -221,6 +224,16 @@ class RouteOptimizer:
             print("❌ GA optimizer not available")
             return None
         
+        # Filter graph if needed
+        working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
+        
+        # Create filtered GA optimizer if needed
+        if exclude_footways and working_graph != self.graph:
+            from genetic_route_optimizer import GeneticRouteOptimizer
+            ga_optimizer = GeneticRouteOptimizer(working_graph)
+        else:
+            ga_optimizer = self._ga_optimizer
+        
         # Convert TSP objective to GA objective
         ga_objective = self._convert_tsp_to_ga_objective(objective)
         
@@ -228,7 +241,7 @@ class RouteOptimizer:
         start_time = time.time()
         
         # Run GA optimization
-        ga_results = self._ga_optimizer.optimize_route(
+        ga_results = ga_optimizer.optimize_route(
             start_node=start_node,
             distance_km=target_distance_km,
             objective=ga_objective
@@ -258,7 +271,7 @@ class RouteOptimizer:
             return None
     
     def _optimize_tsp(self, start_node: int, target_distance_km: float, 
-                     objective: str, algorithm: str) -> Optional[Dict[str, Any]]:
+                     objective: str, algorithm: str, exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
         """Optimize route using TSP solver
         
         Args:
@@ -266,23 +279,27 @@ class RouteOptimizer:
             target_distance_km: Target route distance in kilometers
             objective: Route objective
             algorithm: TSP algorithm to use
+            exclude_footways: Whether to exclude footway segments
             
         Returns:
             Route result dictionary or None if optimization fails
         """
+        # Filter graph if needed
+        working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
+        
         # Apply intelligent candidate filtering for all algorithms when using standard solver
         # (standard solver builds expensive distance matrix, fast solver computes on-demand)
         if self._solver_type == "standard":
-            candidate_nodes = self._get_intersection_nodes()
+            candidate_nodes = self._get_intersection_nodes(working_graph)
             
             # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
             # Stage 1: Fast straight-line filtering to reduce candidate pool
             max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
-            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km)
+            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km, working_graph)
             
             # Stage 2: Precise road distance filtering on reduced set
             max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
-            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km)
+            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km, working_graph)
             
             if start_node not in filtered_candidates:
                 filtered_candidates.append(start_node)
@@ -293,19 +310,19 @@ class RouteOptimizer:
             print(f"   Distance matrix size: {len(filtered_candidates)}² = {len(filtered_candidates)**2:,} calculations")
             
             # Pass filtered candidates to standard solver
-            optimizer = self._optimizer_class(self.graph, candidate_nodes=filtered_candidates)
+            optimizer = self._optimizer_class(working_graph, candidate_nodes=filtered_candidates)
         else:
             # Fast solver: Apply same filtering to reduce search space for all algorithms
-            candidate_nodes = self._get_intersection_nodes()
+            candidate_nodes = self._get_intersection_nodes(working_graph)
             
             # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
             # Stage 1: Fast straight-line filtering to reduce candidate pool
             max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
-            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km)
+            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km, working_graph)
             
             # Stage 2: Precise road distance filtering on reduced set
             max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
-            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km)
+            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km, working_graph)
             
             if start_node not in filtered_candidates:
                 filtered_candidates.append(start_node)
@@ -316,7 +333,7 @@ class RouteOptimizer:
             print(f"   Search space reduction: {len(candidate_nodes)/len(filtered_candidates):.1f}x")
             
             # Pass filtered candidates to fast solver for all algorithms
-            optimizer = self._optimizer_class(self.graph, filtered_candidates=filtered_candidates)
+            optimizer = self._optimizer_class(working_graph, filtered_candidates=filtered_candidates)
         
         # Record timing
         start_time = time.time()
@@ -421,13 +438,19 @@ class RouteOptimizer:
         # This preserves connectivity for shortest path calculations
         return self.graph
     
-    def _get_intersection_nodes(self) -> list:
+    def _get_intersection_nodes(self, graph: nx.Graph = None) -> list:
         """Get intersection nodes using 20m aggressive proximity filtering
         
+        Args:
+            graph: Graph to analyze (uses self.graph if None)
+            
         Returns:
             List of intersection node IDs
         """
         import math
+        
+        if graph is None:
+            graph = self.graph
         
         def haversine_distance(lat1, lon1, lat2, lon2):
             """Calculate distance between two points using haversine formula"""
@@ -440,8 +463,8 @@ class RouteOptimizer:
         
         # Get all potential intersections (non-degree-2 nodes)
         all_intersections = []
-        for node_id, node_data in self.graph.nodes(data=True):
-            if self.graph.degree(node_id) != 2:
+        for node_id, node_data in graph.nodes(data=True):
+            if graph.degree(node_id) != 2:
                 all_intersections.append({
                     'node_id': node_id,
                     'lat': node_data['y'],
@@ -502,18 +525,22 @@ class RouteOptimizer:
         
         return final_intersection_nodes
     
-    def _filter_nodes_by_distance(self, candidate_nodes: list, start_node: int, max_radius_km: float) -> list:
+    def _filter_nodes_by_distance(self, candidate_nodes: list, start_node: int, max_radius_km: float, graph: nx.Graph = None) -> list:
         """Filter candidate nodes by straight-line distance from start node
         
         Args:
             candidate_nodes: List of candidate node IDs
             start_node: Starting node ID
             max_radius_km: Maximum radius in kilometers
+            graph: Graph to use (uses self.graph if None)
             
         Returns:
             List of filtered node IDs within radius
         """
         import math
+        
+        if graph is None:
+            graph = self.graph
         
         def haversine_distance(lat1, lon1, lat2, lon2):
             """Calculate distance between two points using haversine formula"""
@@ -525,14 +552,14 @@ class RouteOptimizer:
             return R * c
         
         # Get start node coordinates
-        start_data = self.graph.nodes[start_node]
+        start_data = graph.nodes[start_node]
         start_lat, start_lon = start_data['y'], start_data['x']
         max_radius_m = max_radius_km * 1000
         
         # Filter nodes by distance
         filtered_nodes = []
         for node in candidate_nodes:
-            node_data = self.graph.nodes[node]
+            node_data = graph.nodes[node]
             node_lat, node_lon = node_data['y'], node_data['x']
             distance = haversine_distance(start_lat, start_lon, node_lat, node_lon)
             
@@ -541,18 +568,22 @@ class RouteOptimizer:
         
         return filtered_nodes
     
-    def _filter_nodes_by_road_distance(self, candidate_nodes: list, start_node: int, max_distance_km: float) -> list:
+    def _filter_nodes_by_road_distance(self, candidate_nodes: list, start_node: int, max_distance_km: float, graph: nx.Graph = None) -> list:
         """Filter candidate nodes by actual road distance from start node
         
         Args:
             candidate_nodes: List of candidate node IDs
             start_node: Starting node ID
             max_distance_km: Maximum road distance in kilometers
+            graph: Graph to use (uses self.graph if None)
             
         Returns:
             List of filtered node IDs within road distance
         """
         import networkx as nx
+        
+        if graph is None:
+            graph = self.graph
         
         max_distance_m = max_distance_km * 1000
         filtered_nodes = []
@@ -575,7 +606,7 @@ class RouteOptimizer:
                 try:
                     # Calculate shortest path distance
                     path_length = nx.shortest_path_length(
-                        self.graph, start_node, node, weight='length'
+                        graph, start_node, node, weight='length'
                     )
                     
                     if path_length <= max_distance_m:
@@ -616,3 +647,43 @@ class RouteOptimizer:
             info['ga_optimizer'] = self._ga_optimizer.__class__.__name__
         
         return info
+    
+    def _filter_graph_for_routing(self, exclude_footways: bool) -> nx.Graph:
+        """Create filtered graph for routing optimization
+        
+        Args:
+            exclude_footways: Whether to exclude footway segments
+            
+        Returns:
+            Filtered NetworkX graph
+        """
+        if not exclude_footways:
+            return self.graph
+        
+        # Create a copy of the graph
+        filtered_graph = self.graph.copy()
+        
+        # Count removals for reporting
+        edges_removed = 0
+        total_footways = 0
+        
+        # Remove footway edges
+        edges_to_remove = []
+        for u, v, data in filtered_graph.edges(data=True):
+            highway = data.get('highway', '')
+            if highway == 'footway':
+                total_footways += 1
+                edges_to_remove.append((u, v))
+                edges_removed += 1
+        
+        # Remove the edges
+        filtered_graph.remove_edges_from(edges_to_remove)
+        
+        # Remove isolated nodes (nodes with no connections after edge removal)
+        isolated_nodes = [node for node in filtered_graph.nodes() if filtered_graph.degree(node) == 0]
+        filtered_graph.remove_nodes_from(isolated_nodes)
+        
+        if edges_removed > 0:
+            print(f"   Footway filtering: removed {edges_removed}/{total_footways} footway edges, {len(isolated_nodes)} isolated nodes")
+        
+        return filtered_graph
