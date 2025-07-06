@@ -330,6 +330,50 @@ def main():
         help="Prevents redundant back-and-forth routes on parallel sidewalks and roads. Recommended for most users."
     )
     
+    # Elevation Data Source Selection
+    st.sidebar.markdown("### Elevation Data")
+    
+    # Try to import elevation sources
+    try:
+        from elevation_data_sources import get_elevation_manager
+        
+        elevation_manager = get_elevation_manager()
+        available_sources = elevation_manager.get_available_sources()
+        
+        if available_sources:
+            # Add "auto" option
+            source_options = ["auto"] + available_sources
+            elevation_source = st.sidebar.selectbox(
+                "Data Source",
+                options=source_options,
+                index=0,  # Default to auto
+                help="Choose elevation data source (auto = best available)"
+            )
+            
+            # Show source status
+            active_source = elevation_manager.get_elevation_source()
+            if active_source:
+                source_info = active_source.get_source_info()
+                resolution = active_source.get_resolution()
+                st.sidebar.info(f"📊 Active: {source_info.get('type', 'Unknown')} ({resolution}m resolution)")
+                
+                # Show caching status if available
+                if hasattr(active_source, 'get_cache_stats'):
+                    if st.sidebar.button("📈 Show Cache Stats"):
+                        cache_stats = active_source.get_cache_stats()
+                        if cache_stats.get('enhanced_caching'):
+                            perf = cache_stats.get('query_performance', {})
+                            st.sidebar.text(f"Cache hits: {perf.get('cache_hit_rate_percent', 0):.1f}%")
+            else:
+                st.sidebar.warning("⚠️ No elevation source active")
+        else:
+            st.sidebar.warning("⚠️ No elevation sources available")
+            elevation_source = "auto"
+            
+    except ImportError:
+        st.sidebar.info("📊 Using basic elevation data")
+        elevation_source = "auto"
+    
     # Difficulty level info
     st.sidebar.markdown("### Difficulty Levels")
     st.sidebar.markdown("""

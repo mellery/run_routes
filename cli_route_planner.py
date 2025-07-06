@@ -47,6 +47,7 @@ class RefactoredCLIRoutePlanner:
         self.selected_start_node = 1529188403  # Default starting point
         self.elevation_config_path = elevation_config_path
         self.elevation_manager = None
+        self.preferred_elevation_source = None
         
     def initialize_services(self, center_point=None, radius_km=5.0):
         """Initialize all route services
@@ -454,6 +455,24 @@ class RefactoredCLIRoutePlanner:
                             print(f"  High-resolution queries: {stats['primary_percentage']:.1f}%")
                             print(f"  Fallback queries: {stats['fallback_percentage']:.1f}%")
                             print(f"  Failed queries: {stats['failure_percentage']:.1f}%")
+                
+                # Show enhanced caching statistics if available
+                if hasattr(active_source, 'get_cache_stats'):
+                    cache_stats = active_source.get_cache_stats()
+                    if cache_stats and 'query_performance' in cache_stats:
+                        perf = cache_stats['query_performance']
+                        print(f"\nCaching Performance:")
+                        print(f"  Total queries: {perf['total_queries']}")
+                        print(f"  Cache hit rate: {perf['cache_hit_rate_percent']:.1f}%")
+                        print(f"  Average query time: {perf['avg_query_time_ms']:.2f}ms")
+                        
+                        if 'lru_cache' in cache_stats:
+                            lru = cache_stats['lru_cache']
+                            print(f"  Memory cache: {lru['size']}/{lru['max_size']} entries")
+                        
+                        if 'spatial_index' in cache_stats:
+                            spatial = cache_stats['spatial_index']
+                            print(f"  Spatial index: {spatial['indexed_tiles']} tiles ({spatial['total_size_mb']}MB)")
             else:
                 print("❌ No active elevation source")
             
@@ -1133,13 +1152,48 @@ def main():
         help='Include footway/sidewalk segments (default is to exclude them to avoid redundant paths)'
     )
     
+    parser.add_argument(
+        '--elevation-source',
+        choices=['3dep_local', 'srtm', 'hybrid', 'auto'],
+        default='auto',
+        help='Elevation data source (auto = intelligent selection based on availability)'
+    )
+    
+    parser.add_argument(
+        '--elevation-config',
+        type=str,
+        help='Path to elevation configuration file'
+    )
+    
+    parser.add_argument(
+        '--show-elevation-status',
+        action='store_true',
+        help='Show elevation data source status and exit'
+    )
+    
+    parser.add_argument(
+        '--preload-elevation',
+        action='store_true',
+        help='Preload elevation data for better performance'
+    )
+    
     args = parser.parse_args()
+    
+    # Handle elevation status request
+    if args.show_elevation_status:
+        planner = RefactoredCLIRoutePlanner(elevation_config_path=args.elevation_config)
+        planner.show_elevation_status()
+        return
     
     if args.interactive or (not args.start_node and not args.distance):
         interactive_mode()
     else:
         # Command line mode
-        planner = RefactoredCLIRoutePlanner()
+        planner = RefactoredCLIRoutePlanner(elevation_config_path=args.elevation_config)
+        
+        # Configure elevation source if specified
+        if args.elevation_source != 'auto':
+            planner.configure_elevation_source(args.elevation_source)
         
         # Determine required network radius based on target distance
         required_radius = 5.0  # Default
@@ -1149,6 +1203,21 @@ def main():
         
         if not planner.initialize_services(radius_km=required_radius):
             sys.exit(1)
+        
+        # Preload elevation data if requested
+        if args.preload_elevation:
+            center_lat, center_lon = 37.1299, -80.4094  # Default Christiansburg
+            print(f"🚀 Preloading elevation data around ({center_lat:.4f}, {center_lon:.4f})...")
+            try:
+                elevation_manager = planner.elevation_manager or get_elevation_manager(args.elevation_config)
+                source = elevation_manager.get_elevation_source()
+                if hasattr(source, 'preload_area'):
+                    source.preload_area(center_lat, center_lon, required_radius)
+                    print("✅ Elevation data preloaded")
+                else:
+                    print("⚠️ Preloading not supported by current elevation source")
+            except Exception as e:
+                print(f"⚠️ Elevation preloading failed: {e}")
         
         route_optimizer = planner.services['route_optimizer']
         

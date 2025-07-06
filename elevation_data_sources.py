@@ -9,7 +9,7 @@ import json
 import sqlite3
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple, Union, Any
 import logging
 
 # Configure logging
@@ -199,9 +199,9 @@ class SRTMElevationSource(ElevationDataSource):
 
 
 class LocalThreeDEPSource(ElevationDataSource):
-    """Local file-based 3DEP 1-meter elevation data source"""
+    """Local file-based 3DEP 1-meter elevation data source with enhanced caching"""
     
-    def __init__(self, data_directory: str = "./elevation_data/3dep_1m"):
+    def __init__(self, data_directory: str = "./elevation_data/3dep_1m", enable_enhanced_caching: bool = True):
         self.data_dir = Path(data_directory)
         self.tiles_dir = self.data_dir / "tiles"
         self.index_dir = self.data_dir / "index"
@@ -216,11 +216,39 @@ class LocalThreeDEPSource(ElevationDataSource):
         self.open_files = {}  # Cache for opened rasterio files
         self.max_open_files = 10  # Limit number of open files
         
+        # Enhanced caching support
+        self.enhanced_caching = enable_enhanced_caching
+        self.cache_manager = None
+        
         if not RASTERIO_AVAILABLE:
             logger.error("Rasterio not available - 3DEP support disabled")
             return
         
         self._initialize_tile_index()
+        self._initialize_enhanced_caching()
+    
+    def _initialize_enhanced_caching(self):
+        """Initialize enhanced caching system"""
+        if not self.enhanced_caching:
+            return
+        
+        try:
+            from elevation_cache_manager import get_cache_manager
+            self.cache_manager = get_cache_manager()
+            
+            # Index all tiles in the spatial cache
+            for tile_path in self.tile_index.keys():
+                if os.path.exists(tile_path):
+                    self.cache_manager.index_tile(tile_path)
+            
+            logger.info(f"Enhanced caching initialized for {len(self.tile_index)} tiles")
+            
+        except ImportError:
+            logger.warning("Enhanced caching not available - elevation_cache_manager not found")
+            self.enhanced_caching = False
+        except Exception as e:
+            logger.warning(f"Failed to initialize enhanced caching: {e}")
+            self.enhanced_caching = False
     
     def _initialize_tile_index(self):
         """Initialize tile index from available files"""
@@ -320,10 +348,22 @@ class LocalThreeDEPSource(ElevationDataSource):
             return None
     
     def get_elevation(self, lat: float, lon: float) -> Optional[float]:
-        """Get elevation at a specific coordinate"""
+        """Get elevation at a specific coordinate with enhanced caching"""
         if not RASTERIO_AVAILABLE:
             return None
         
+        # Use enhanced caching if available
+        if self.enhanced_caching and self.cache_manager:
+            try:
+                return self.cache_manager.get_elevation_cached(lat, lon, self)
+            except Exception as e:
+                logger.warning(f"Enhanced caching failed, falling back to direct access: {e}")
+        
+        # Original implementation as fallback
+        return self._get_elevation_direct(lat, lon)
+    
+    def _get_elevation_direct(self, lat: float, lon: float) -> Optional[float]:
+        """Direct elevation lookup without caching (used as fallback)"""
         covering_tiles = self._find_covering_tiles(lat, lon)
         
         if not covering_tiles:
@@ -359,6 +399,17 @@ class LocalThreeDEPSource(ElevationDataSource):
         except Exception as e:
             logger.warning(f"Failed to read elevation from {tile_path}: {e}")
             return None
+    
+    def preload_area(self, center_lat: float, center_lon: float, radius_km: float = 5.0):
+        """Preload tiles for an area to improve performance"""
+        if self.enhanced_caching and self.cache_manager:
+            self.cache_manager.preload_area(center_lat, center_lon, radius_km)
+    
+    def get_cache_stats(self) -> Dict[str, Any]:
+        """Get caching performance statistics"""
+        if self.enhanced_caching and self.cache_manager:
+            return self.cache_manager.get_performance_stats()
+        return {"enhanced_caching": False}
     
     def get_elevation_profile(self, coordinates: List[Tuple[float, float]]) -> List[float]:
         """Get elevation profile for a list of coordinates"""
@@ -408,13 +459,20 @@ class LocalThreeDEPSource(ElevationDataSource):
         self._rebuild_tile_index()
     
     def close(self):
-        """Close all open rasterio files"""
+        """Close all open rasterio files and cache resources"""
         for src in self.open_files.values():
             try:
                 src.close()
             except:
                 pass
         self.open_files.clear()
+        
+        # Close enhanced caching resources
+        if self.enhanced_caching and self.cache_manager:
+            try:
+                self.cache_manager.close()
+            except:
+                pass
 
 
 class HybridElevationSource(ElevationDataSource):

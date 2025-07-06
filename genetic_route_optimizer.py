@@ -7,15 +7,28 @@ Main genetic algorithm implementation for route optimization
 import time
 import random
 import math
+import logging
 from typing import List, Dict, Any, Optional, Tuple, Callable
 from dataclasses import dataclass
 from datetime import datetime
 import networkx as nx
 
+# Configure logging
+logger = logging.getLogger(__name__)
+
 from ga_chromosome import RouteChromosome
 from ga_population import PopulationInitializer
 from ga_operators import GAOperators
 from ga_fitness import GAFitnessEvaluator, FitnessObjective
+
+# Enhanced 1m precision components
+try:
+    from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator
+    from ga_precision_operators import PrecisionAwareCrossover, PrecisionAwareMutation
+    from ga_precision_visualizer import PrecisionComparisonVisualizer
+    PRECISION_ENHANCEMENT_AVAILABLE = True
+except ImportError:
+    PRECISION_ENHANCEMENT_AVAILABLE = False
 
 
 @dataclass
@@ -31,6 +44,14 @@ class GAConfig:
     convergence_generations: int = 20
     adaptive_sizing: bool = True
     verbose: bool = True
+    
+    # Enhanced 1m precision settings
+    enable_precision_enhancement: bool = True
+    precision_fitness_weight: float = 0.3
+    micro_terrain_preference: float = 0.4
+    elevation_bias_strength: float = 0.5
+    generate_precision_visualizations: bool = False
+    precision_comparison_interval: int = 25  # Generate comparison every N generations
 
 
 @dataclass
@@ -45,6 +66,12 @@ class GAResults:
     population_history: List[List[RouteChromosome]]
     fitness_history: List[List[float]]
     stats: Dict[str, Any]
+    
+    # Enhanced 1m precision results
+    precision_benefits: Optional[Dict[str, Any]] = None
+    micro_terrain_features: Optional[Dict[str, Any]] = None
+    precision_visualizations: Optional[List[str]] = None
+    elevation_profile_comparison: Optional[Dict[str, Any]] = None
 
 
 class GeneticRouteOptimizer:
@@ -64,6 +91,30 @@ class GeneticRouteOptimizer:
         self.population_initializer = None
         self.operators = GAOperators(graph)
         self.fitness_evaluator = None
+        
+        # Enhanced 1m precision components
+        self.precision_components_enabled = (PRECISION_ENHANCEMENT_AVAILABLE and 
+                                           self.config.enable_precision_enhancement)
+        
+        if self.precision_components_enabled:
+            self.precision_analyzer = PrecisionElevationAnalyzer()
+            self.enhanced_fitness_evaluator = EnhancedGAFitnessEvaluator(graph, self.precision_analyzer)
+            self.precision_crossover = PrecisionAwareCrossover(graph, self.precision_analyzer)
+            self.precision_mutation = PrecisionAwareMutation(graph, self.precision_analyzer)
+            
+            if self.config.generate_precision_visualizations:
+                self.precision_visualizer = PrecisionComparisonVisualizer()
+                self.precision_visualizations = []
+            else:
+                self.precision_visualizer = None
+                self.precision_visualizations = []
+        else:
+            self.precision_analyzer = None
+            self.enhanced_fitness_evaluator = None
+            self.precision_crossover = None
+            self.precision_mutation = None
+            self.precision_visualizer = None
+            self.precision_visualizations = []
         
         # Evolution tracking
         self.generation = 0
@@ -120,8 +171,8 @@ class GeneticRouteOptimizer:
         if not population:
             raise ValueError("Failed to initialize population")
         
-        # Evaluate initial population
-        fitness_scores = self.fitness_evaluator.evaluate_population(population)
+        # Evaluate initial population with precision enhancement
+        fitness_scores = self._evaluate_population_with_precision(population, objective, distance_km)
         
         # Track initial state
         self.population_history.append(population.copy())
@@ -185,6 +236,12 @@ class GeneticRouteOptimizer:
             if visualizer and generation % 25 == 0:
                 self._generate_visualization(population, fitness_scores, generation, visualizer)
             
+            # Generate precision comparison visualization
+            if (self.precision_components_enabled and self.precision_visualizer and 
+                self.config.generate_precision_visualizations and 
+                generation % self.config.precision_comparison_interval == 0):
+                self._generate_precision_visualization(population, fitness_scores, generation)
+            
             # Check convergence
             if self._check_convergence(fitness_scores):
                 convergence_reason = "convergence"
@@ -212,12 +269,55 @@ class GeneticRouteOptimizer:
             stats=self._get_optimization_stats()
         )
         
+        # Add precision enhancement results
+        if self.precision_components_enabled:
+            # Generate final precision analysis
+            best_route_coords = self._chromosome_to_coordinates(self.best_chromosome)
+            
+            if self.enhanced_fitness_evaluator:
+                try:
+                    precision_comparison = self.enhanced_fitness_evaluator.compare_precision_benefits(
+                        best_route_coords
+                    )
+                    results.precision_benefits = precision_comparison.get('precision_benefits', {})
+                    results.micro_terrain_features = precision_comparison.get('high_resolution', {}).get('elevation_profile', {}).get('micro_terrain_features', {})
+                    results.elevation_profile_comparison = precision_comparison
+                except Exception as e:
+                    logger.warning(f"Failed to generate precision comparison: {e}")
+            
+            # Add precision visualizations
+            if self.precision_visualizations:
+                results.precision_visualizations = self.precision_visualizations.copy()
+            
+            # Generate final precision comparison visualization
+            if self.precision_visualizer:
+                try:
+                    final_viz = self.precision_visualizer.create_precision_comparison_visualization(
+                        best_route_coords, self.graph, " - Final Best Route"
+                    )
+                    if final_viz:
+                        results.precision_visualizations = results.precision_visualizations or []
+                        results.precision_visualizations.append(final_viz)
+                except Exception as e:
+                    logger.warning(f"Failed to generate final precision visualization: {e}")
+        
         if self.config.verbose:
             print(f"🏁 Optimization completed:")
             print(f"   Best fitness: {self.best_fitness:.4f}")
             print(f"   Found at generation: {self.best_generation}")
             print(f"   Total time: {total_time:.2f}s")
             print(f"   Convergence: {convergence_reason}")
+            
+            # Report precision benefits if available
+            if (self.precision_components_enabled and results.precision_benefits):
+                benefits = results.precision_benefits
+                print(f"🔬 Precision Enhancement Benefits:")
+                print(f"   Micro-features discovered: {benefits.get('micro_features_discovered', 0)}")
+                print(f"   Fitness improvement: {benefits.get('fitness_improvement', 0):.3f}")
+                print(f"   Resolution factor: {benefits.get('resolution_factor', 1):.1f}x")
+                
+                if results.precision_visualizations:
+                    print(f"   Visualizations saved: {len(results.precision_visualizations)}")
         
         return results
     
@@ -252,6 +352,83 @@ class GeneticRouteOptimizer:
         self.config.elite_size = max(5, self.config.population_size // 10)
         self.config.tournament_size = max(3, self.config.population_size // 20)
     
+    def _evaluate_population_with_precision(self, population: List[RouteChromosome], 
+                                           objective: str, distance_km: float) -> List[float]:
+        """Evaluate population using precision-enhanced fitness if available
+        
+        Args:
+            population: Population to evaluate
+            objective: Fitness objective
+            distance_km: Target distance
+            
+        Returns:
+            List of fitness scores
+        """
+        if self.precision_components_enabled and self.enhanced_fitness_evaluator:
+            # Use precision-enhanced fitness evaluation
+            fitness_scores = []
+            
+            for chromosome in population:
+                try:
+                    # Convert chromosome to coordinates
+                    route_coords = self._chromosome_to_coordinates(chromosome)
+                    
+                    # Evaluate with precision enhancement
+                    fitness_result = self.enhanced_fitness_evaluator.evaluate_route_fitness(
+                        route_coords, objective, distance_km
+                    )
+                    
+                    # Apply precision fitness weight
+                    base_fitness = fitness_result.get('total_fitness', 0.0)
+                    precision_bonus = fitness_result.get('components', {}).get('precision_bonus', 0.0)
+                    
+                    # Weighted combination of base fitness and precision enhancement
+                    enhanced_fitness = (
+                        base_fitness * (1 - self.config.precision_fitness_weight) +
+                        precision_bonus * self.config.precision_fitness_weight
+                    )
+                    
+                    fitness_scores.append(enhanced_fitness)
+                    
+                    # Store precision data in chromosome for later analysis
+                    if hasattr(chromosome, 'precision_data'):
+                        chromosome.precision_data = {
+                            'micro_terrain_features': fitness_result.get('elevation_profile', {}).get('micro_terrain_features', {}),
+                            'precision_benefits': fitness_result.get('components', {}),
+                            'fitness_components': fitness_result.get('components', {})
+                        }
+                
+                except Exception as e:
+                    logger.warning(f"Precision fitness evaluation failed for chromosome: {e}")
+                    # Fallback to standard fitness evaluation
+                    fallback_fitness = self.fitness_evaluator.evaluate_chromosome(chromosome)
+                    fitness_scores.append(fallback_fitness)
+            
+            return fitness_scores
+        else:
+            # Use standard fitness evaluation
+            return self.fitness_evaluator.evaluate_population(population)
+    
+    def _chromosome_to_coordinates(self, chromosome: RouteChromosome) -> List[Tuple[float, float]]:
+        """Convert chromosome route to coordinate list
+        
+        Args:
+            chromosome: Route chromosome
+            
+        Returns:
+            List of (lat, lon) coordinate pairs
+        """
+        coordinates = []
+        
+        for node_id in chromosome.route:
+            if node_id in self.graph:
+                node_data = self.graph.nodes[node_id]
+                lat = node_data.get('y', 0.0)  # y is latitude
+                lon = node_data.get('x', 0.0)  # x is longitude
+                coordinates.append((lat, lon))
+        
+        return coordinates
+    
     def _evolve_generation(self, population: List[RouteChromosome], 
                          fitness_scores: List[float]) -> Tuple[List[RouteChromosome], List[float]]:
         """Evolve population for one generation"""
@@ -269,18 +446,60 @@ class GeneticRouteOptimizer:
             parent1 = self.operators.tournament_selection(population, self.config.tournament_size)
             parent2 = self.operators.tournament_selection(population, self.config.tournament_size)
             
-            # Crossover
-            offspring1, offspring2 = self.operators.segment_exchange_crossover(
-                parent1, parent2, self.config.crossover_rate
-            )
+            # Crossover (use precision-aware if available)
+            if (self.precision_components_enabled and self.precision_crossover and 
+                random.random() < self.config.micro_terrain_preference):
+                try:
+                    # Use precision-aware terrain-guided crossover
+                    offspring1_route, offspring2_route = self.precision_crossover.terrain_guided_crossover(
+                        parent1.route, parent2.route, self.fitness_evaluator.target_distance_km
+                    )
+                    # Convert back to chromosomes
+                    offspring1 = RouteChromosome(offspring1_route, self.graph)
+                    offspring2 = RouteChromosome(offspring2_route, self.graph)
+                except Exception as e:
+                    logger.warning(f"Precision crossover failed, using standard: {e}")
+                    # Fallback to standard crossover
+                    offspring1, offspring2 = self.operators.segment_exchange_crossover(
+                        parent1, parent2, self.config.crossover_rate
+                    )
+            else:
+                # Use standard crossover
+                offspring1, offspring2 = self.operators.segment_exchange_crossover(
+                    parent1, parent2, self.config.crossover_rate
+                )
             
-            # Mutation
-            offspring1 = self.operators.segment_replacement_mutation(
-                offspring1, self.config.mutation_rate
-            )
-            offspring2 = self.operators.route_extension_mutation(
-                offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
-            )
+            # Mutation (use precision-aware if available)
+            if (self.precision_components_enabled and self.precision_mutation and 
+                random.random() < self.config.elevation_bias_strength):
+                try:
+                    # Use precision-aware elevation-biased mutation
+                    mutated_route1 = self.precision_mutation.elevation_biased_mutation(
+                        offspring1.route, self.config.mutation_rate
+                    )
+                    mutated_route2 = self.precision_mutation.elevation_biased_mutation(
+                        offspring2.route, self.config.mutation_rate
+                    )
+                    # Convert back to chromosomes
+                    offspring1 = RouteChromosome(mutated_route1, self.graph)
+                    offspring2 = RouteChromosome(mutated_route2, self.graph)
+                except Exception as e:
+                    logger.warning(f"Precision mutation failed, using standard: {e}")
+                    # Fallback to standard mutation
+                    offspring1 = self.operators.segment_replacement_mutation(
+                        offspring1, self.config.mutation_rate
+                    )
+                    offspring2 = self.operators.route_extension_mutation(
+                        offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
+                    )
+            else:
+                # Use standard mutation
+                offspring1 = self.operators.segment_replacement_mutation(
+                    offspring1, self.config.mutation_rate
+                )
+                offspring2 = self.operators.route_extension_mutation(
+                    offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
+                )
             
             # Add to population
             new_population.extend([offspring1, offspring2])
@@ -288,8 +507,10 @@ class GeneticRouteOptimizer:
         # Trim to exact population size
         new_population = new_population[:self.config.population_size]
         
-        # Evaluate new population
-        new_fitness_scores = self.fitness_evaluator.evaluate_population(new_population)
+        # Evaluate new population with precision enhancement
+        new_fitness_scores = self._evaluate_population_with_precision(
+            new_population, self.fitness_evaluator.objective.value, self.fitness_evaluator.target_distance_km
+        )
         
         return new_population, new_fitness_scores
     
@@ -330,6 +551,35 @@ class GeneticRouteOptimizer:
         except Exception as e:
             if self.config.verbose:
                 print(f"⚠️ Visualization failed: {e}")
+    
+    def _generate_precision_visualization(self, population: List[RouteChromosome], 
+                                        fitness_scores: List[float], generation: int):
+        """Generate precision comparison visualization for current generation"""
+        try:
+            # Get best chromosome from current generation
+            best_idx = fitness_scores.index(max(fitness_scores))
+            best_chromosome = population[best_idx]
+            
+            # Convert to coordinates
+            route_coords = self._chromosome_to_coordinates(best_chromosome)
+            
+            # Generate precision comparison visualization
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            title_suffix = f" - Generation {generation}"
+            
+            visualization_path = self.precision_visualizer.create_precision_comparison_visualization(
+                route_coords, self.graph, title_suffix
+            )
+            
+            if visualization_path:
+                self.precision_visualizations.append(visualization_path)
+                
+                if self.config.verbose and generation % 50 == 0:
+                    print(f"📊 Saved precision visualization: {visualization_path}")
+                    
+        except Exception as e:
+            if self.config.verbose:
+                print(f"⚠️ Precision visualization failed: {e}")
     
     def _get_optimization_stats(self) -> Dict[str, Any]:
         """Get comprehensive optimization statistics"""
