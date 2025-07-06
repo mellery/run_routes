@@ -149,10 +149,13 @@ class EnhancedElevationProfiler:
         elevations = elevations[:min_length]
         distances_km = distances_km[:min_length]
         
+        # Ensure distances_m array also matches the length
+        distances_m = distances[:min_length] if len(distances) > 0 else []
+        
         return {
             'coordinates': coordinates,
             'elevations': elevations,
-            'distances_m': distances[:min_length],
+            'distances_m': distances_m,
             'distances_km': distances_km,
             'total_distance_km': distances_km[-1] if distances_km else 0,
             'elevation_stats': elevation_stats,

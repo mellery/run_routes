@@ -604,9 +604,36 @@ class RefactoredCLIRoutePlanner:
             try:
                 import matplotlib.pyplot as plt
                 
-                elevations = profile_data['elevations']
-                distances_km = profile_data['distances_km']
-                coordinates = profile_data['coordinates']
+                # Debug: Check array lengths before unpacking
+                if self.verbose:
+                    print(f"   Debug - Profile data keys: {list(profile_data.keys())}")
+                    print(f"   Debug - Elevations length: {len(profile_data.get('elevations', []))}")
+                    print(f"   Debug - Distances_km length: {len(profile_data.get('distances_km', []))}")
+                    print(f"   Debug - Coordinates length: {len(profile_data.get('coordinates', []))}")
+                
+                elevations = profile_data.get('elevations', [])
+                distances_km = profile_data.get('distances_km', [])
+                coordinates = profile_data.get('coordinates', [])
+                
+                # Validate that all required arrays exist and have data
+                if not elevations or not distances_km or not coordinates:
+                    print("❌ Missing elevation profile data arrays")
+                    print(f"   elevations: {len(elevations)}, distances_km: {len(distances_km)}, coordinates: {len(coordinates)}")
+                    return
+                
+                # Ensure all arrays have the same length
+                min_length = min(len(elevations), len(distances_km), len(coordinates))
+                if min_length == 0:
+                    print("❌ No elevation data available for visualization")
+                    return
+                
+                if min_length < len(elevations) or min_length < len(distances_km) or min_length < len(coordinates):
+                    print(f"⚠️ Array length mismatch - truncating to {min_length} points")
+                
+                # Truncate arrays to same length if needed
+                elevations = elevations[:min_length]
+                distances_km = distances_km[:min_length]
+                coordinates = coordinates[:min_length]
                 
                 # Create figure with elevation profile
                 fig, ax = plt.subplots(1, 1, figsize=(12, 6))

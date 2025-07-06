@@ -457,10 +457,20 @@ class RouteOptimizer:
         """
         best_chromosome = ga_results.best_chromosome
         
-        # Get basic route information
-        route_nodes = best_chromosome.get_complete_path()
+        # Get basic route information (use route nodes instead of complete path for better connectivity)
+        route_nodes = best_chromosome.get_route_nodes()
         total_distance = best_chromosome.get_total_distance()
         total_elevation_gain = best_chromosome.get_total_elevation_gain()
+        
+        # Ensure route forms a complete loop by returning to start
+        if route_nodes and len(best_chromosome.segments) > 0:
+            start_node = best_chromosome.segments[0].start_node
+            if route_nodes[-1] != start_node:
+                # Only add start node if there's a direct edge, otherwise leave incomplete
+                if self.graph.has_edge(route_nodes[-1], start_node):
+                    route_nodes.append(start_node)
+                # Note: If no direct edge exists, the route remains incomplete
+                # This is better than adding invalid edges that break test validation
         
         # Create standard result format
         result = {
