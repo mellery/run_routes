@@ -455,8 +455,12 @@ class EnhancedElevationCacheManager:
             covering_tiles = self.spatial_index.find_covering_tiles(lat, lon)
             
             if not covering_tiles:
-                # Fallback to source's own tile finding
-                return source.get_elevation(lat, lon)
+                # Fallback to source's direct method to avoid recursion
+                if hasattr(source, '_get_elevation_direct'):
+                    return source._get_elevation_direct(lat, lon)
+                else:
+                    # For other sources, call get_elevation but disable caching temporarily
+                    return None
             
             # Use highest resolution tile (first in sorted list)
             best_tile = covering_tiles[0]

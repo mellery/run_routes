@@ -104,7 +104,8 @@ class EnhancedElevationProfiler:
                             # Fallback to graph elevation
                             elevations.append(data.get('elevation', 0))
                     except Exception as e:
-                        print(f"⚠️ Enhanced elevation lookup failed for node {node}: {e}")
+                        if self.verbose:
+                            print(f"⚠️ Enhanced elevation lookup failed for node {node}: {e}")
                         elevations.append(data.get('elevation', 0))
                 else:
                     # Use original graph elevation
@@ -139,10 +140,20 @@ class EnhancedElevationProfiler:
         # Add data source information
         data_source_info = self._get_data_source_info()
         
+        # Ensure all arrays have the same length for safe unpacking
+        min_length = min(len(coordinates), len(elevations), len(distances_km))
+        if min_length == 0:
+            return {}
+        
+        # Truncate arrays to the same length to prevent unpacking errors
+        coordinates = coordinates[:min_length]
+        elevations = elevations[:min_length]
+        distances_km = distances_km[:min_length]
+        
         return {
             'coordinates': coordinates,
             'elevations': elevations,
-            'distances_m': distances,
+            'distances_m': distances[:min_length],
             'distances_km': distances_km,
             'total_distance_km': distances_km[-1] if distances_km else 0,
             'elevation_stats': elevation_stats,
@@ -499,6 +510,155 @@ class EnhancedElevationProfiler:
                 
             except KeyError:
                 return 0
+    
+    def get_detailed_route_path(self, route_result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Get detailed route path including all intermediate nodes along roads
+        
+        Args:
+            route_result: Route result from optimizer
+            
+        Returns:
+            List of coordinate dictionaries for complete route path
+        """
+        if not route_result or not route_result.get('route'):
+            return []
+        
+        route = route_result['route']
+        detailed_path = []
+        
+        # Add starting node
+        if route[0] in self.graph.nodes:
+            start_data = self.graph.nodes[route[0]]
+            elevation = start_data.get('elevation', 0)
+            
+            # Try to get enhanced elevation if available
+            if self.elevation_source:
+                try:
+                    enhanced_elevation = self.elevation_source.get_elevation(start_data['y'], start_data['x'])
+                    if enhanced_elevation is not None:
+                        elevation = enhanced_elevation
+                except Exception:
+                    pass  # Fall back to graph elevation
+            
+            detailed_path.append({
+                'latitude': start_data['y'],
+                'longitude': start_data['x'],
+                'node_id': route[0],
+                'elevation': elevation,
+                'node_type': 'intersection'
+            })
+        
+        # Add all intermediate nodes for each segment
+        for i in range(len(route) - 1):
+            current_node = route[i]
+            next_node = route[i + 1]
+            
+            # Get shortest path between intersections
+            try:
+                path = nx.shortest_path(self.graph, current_node, next_node, weight='length')
+                
+                # Add all intermediate nodes (skip first node as it's already added)
+                for j in range(1, len(path)):
+                    node_id = path[j]
+                    if node_id in self.graph.nodes:
+                        node_data = self.graph.nodes[node_id]
+                        elevation = node_data.get('elevation', 0)
+                        
+                        # Try to get enhanced elevation if available
+                        if self.elevation_source:
+                            try:
+                                enhanced_elevation = self.elevation_source.get_elevation(node_data['y'], node_data['x'])
+                                if enhanced_elevation is not None:
+                                    elevation = enhanced_elevation
+                            except Exception:
+                                pass  # Fall back to graph elevation
+                        
+                        detailed_path.append({
+                            'latitude': node_data['y'],
+                            'longitude': node_data['x'],
+                            'node_id': node_id,
+                            'elevation': elevation,
+                            'node_type': 'intersection' if self.graph.degree(node_id) != 2 else 'geometry'
+                        })
+            except nx.NetworkXNoPath:
+                # If no path found, just connect with straight line (fallback)
+                if next_node in self.graph.nodes:
+                    next_data = self.graph.nodes[next_node]
+                    elevation = next_data.get('elevation', 0)
+                    
+                    # Try to get enhanced elevation if available
+                    if self.elevation_source:
+                        try:
+                            enhanced_elevation = self.elevation_source.get_elevation(next_data['y'], next_data['x'])
+                            if enhanced_elevation is not None:
+                                elevation = enhanced_elevation
+                        except Exception:
+                            pass  # Fall back to graph elevation
+                    
+                    detailed_path.append({
+                        'latitude': next_data['y'],
+                        'longitude': next_data['x'],
+                        'node_id': next_node,
+                        'elevation': elevation,
+                        'node_type': 'intersection'
+                    })
+        
+        # Add return path to start
+        if len(route) > 1:
+            last_node = route[-1]
+            start_node = route[0]
+            
+            # Get shortest path back to start
+            try:
+                return_path = nx.shortest_path(self.graph, last_node, start_node, weight='length')
+                
+                # Add nodes from return path (skip first node as it's already added)
+                for j in range(1, len(return_path)):
+                    node_id = return_path[j]
+                    if node_id in self.graph.nodes:
+                        node_data = self.graph.nodes[node_id]
+                        elevation = node_data.get('elevation', 0)
+                        
+                        # Try to get enhanced elevation if available
+                        if self.elevation_source:
+                            try:
+                                enhanced_elevation = self.elevation_source.get_elevation(node_data['y'], node_data['x'])
+                                if enhanced_elevation is not None:
+                                    elevation = enhanced_elevation
+                            except Exception:
+                                pass  # Fall back to graph elevation
+                        
+                        detailed_path.append({
+                            'latitude': node_data['y'],
+                            'longitude': node_data['x'],
+                            'node_id': node_id,
+                            'elevation': elevation,
+                            'node_type': 'intersection' if self.graph.degree(node_id) != 2 else 'geometry'
+                        })
+            except nx.NetworkXNoPath:
+                # Fallback: just add start node again
+                if start_node in self.graph.nodes:
+                    start_data = self.graph.nodes[start_node]
+                    elevation = start_data.get('elevation', 0)
+                    
+                    # Try to get enhanced elevation if available
+                    if self.elevation_source:
+                        try:
+                            enhanced_elevation = self.elevation_source.get_elevation(start_data['y'], start_data['x'])
+                            if enhanced_elevation is not None:
+                                elevation = enhanced_elevation
+                        except Exception:
+                            pass  # Fall back to graph elevation
+                    
+                    detailed_path.append({
+                        'latitude': start_data['y'],
+                        'longitude': start_data['x'],
+                        'node_id': start_node,
+                        'elevation': elevation,
+                        'node_type': 'intersection'
+                    })
+        
+        return detailed_path
     
     def close(self):
         """Clean up resources"""

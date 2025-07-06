@@ -362,6 +362,11 @@ class LocalThreeDEPSource(ElevationDataSource):
         if self.enhanced_caching and self.cache_manager:
             try:
                 return self.cache_manager.get_elevation_cached(lat, lon, self)
+            except RecursionError:
+                # Disable enhanced caching permanently to prevent recursion
+                logger.warning("Enhanced caching recursion detected, disabling enhanced caching")
+                self.enhanced_caching = False
+                return self._get_elevation_direct(lat, lon)
             except Exception as e:
                 logger.warning(f"Enhanced caching failed, falling back to direct access: {e}")
         
