@@ -13,7 +13,7 @@ from enum import Enum
 import networkx as nx
 from abc import ABC, abstractmethod
 
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 from ga_chromosome import RouteChromosome
 
 

@@ -17,7 +17,7 @@ import math
 from concurrent.futures import ThreadPoolExecutor
 
 from ga_parameter_tuner import GAParameterTuner, ParameterRange, PopulationStats
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 
 
 class SensitivityMethod(Enum):

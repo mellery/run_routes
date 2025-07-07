@@ -6,6 +6,7 @@ Supports SRTM, local 3DEP files, and hybrid configurations
 
 import os
 import json
+import math
 import sqlite3
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -219,8 +220,13 @@ class LocalThreeDEPSource(ElevationDataSource):
         
         self.resolution = 1.0  # meters
         self.tile_index = {}
+        self.spatial_index = {}  # Grid-based spatial index for fast tile lookup
+        self.grid_size = 0.01  # Grid cell size in degrees (~1km)
         self.open_files = {}  # Cache for opened rasterio files
-        self.max_open_files = 10  # Limit number of open files
+        self.file_access_order = []  # LRU tracking for file cache
+        self.max_open_files = 100  # Increased limit for better performance
+        self.preloaded_tiles = set()  # Track which tiles are kept in memory
+        self.transformer_cache = {}  # Cache for pyproj transformers
         
         # Enhanced caching support
         self.enhanced_caching = enable_enhanced_caching
@@ -304,6 +310,79 @@ class LocalThreeDEPSource(ElevationDataSource):
             logger.info(f"Saved tile index with {len(self.tile_index)} tiles")
         except Exception as e:
             logger.error(f"Failed to save tile index: {e}")
+        
+        # Build spatial index for fast lookups
+        self._build_spatial_index()
+    
+    def _build_spatial_index(self):
+        """Build spatial grid index for fast tile lookups"""
+        logger.info("Building spatial index for tile lookups...")
+        self.spatial_index = {}
+        
+        for tile_path, tile_info in self.tile_index.items():
+            bounds = tile_info['bounds']  # [west, south, east, north]
+            
+            # Calculate grid cells covered by this tile
+            west, south, east, north = bounds
+            
+            # Find grid bounds
+            min_col = int(west / self.grid_size)
+            max_col = int(east / self.grid_size) + 1
+            min_row = int(south / self.grid_size)
+            max_row = int(north / self.grid_size) + 1
+            
+            # Add tile to all covering grid cells
+            for row in range(min_row, max_row + 1):
+                for col in range(min_col, max_col + 1):
+                    grid_key = (row, col)
+                    if grid_key not in self.spatial_index:
+                        self.spatial_index[grid_key] = []
+                    self.spatial_index[grid_key].append(tile_path)
+        
+        logger.info(f"Spatial index built with {len(self.spatial_index)} grid cells")
+    
+    def _get_grid_key(self, lat: float, lon: float) -> Tuple[int, int]:
+        """Get grid key for coordinate"""
+        row = int(lat / self.grid_size)
+        col = int(lon / self.grid_size)
+        return (row, col)
+    
+    def _find_covering_tiles_fast(self, lat: float, lon: float) -> List[str]:
+        """Fast tile lookup using spatial index"""
+        grid_key = self._get_grid_key(lat, lon)
+        candidate_tiles = self.spatial_index.get(grid_key, [])
+        
+        covering_tiles = []
+        for tile_path in candidate_tiles:
+            tile_info = self.tile_index.get(tile_path)
+            if not tile_info:
+                continue
+            
+            try:
+                # Get tile CRS and transform lat/lon to tile coordinates
+                tile_crs = tile_info.get('crs', 'EPSG:4326')
+                
+                if tile_crs != 'EPSG:4326':
+                    # Transform lat/lon to tile CRS
+                    transformer = self._get_transformer('EPSG:4326', tile_crs)
+                    if transformer:
+                        x, y = transformer.transform(lon, lat)
+                    else:
+                        continue
+                else:
+                    x, y = lon, lat
+                
+                bounds = tile_info['bounds']  # [west, south, east, north] in tile CRS
+                
+                if (bounds[0] <= x <= bounds[2] and 
+                    bounds[1] <= y <= bounds[3]):
+                    covering_tiles.append(tile_path)
+                    
+            except Exception as e:
+                logger.warning(f"Failed to check coverage for tile {tile_path}: {e}")
+                continue
+        
+        return covering_tiles
     
     def _find_covering_tiles(self, lat: float, lon: float) -> List[str]:
         """Find tiles that cover the given coordinate"""
@@ -316,9 +395,11 @@ class LocalThreeDEPSource(ElevationDataSource):
                 
                 if tile_crs != 'EPSG:4326':
                     # Transform lat/lon to tile CRS
-                    import pyproj
-                    transformer = pyproj.Transformer.from_crs('EPSG:4326', tile_crs, always_xy=True)
-                    x, y = transformer.transform(lon, lat)
+                    transformer = self._get_transformer('EPSG:4326', tile_crs)
+                    if transformer:
+                        x, y = transformer.transform(lon, lat)
+                    else:
+                        continue
                 else:
                     x, y = lon, lat
                 
@@ -335,23 +416,83 @@ class LocalThreeDEPSource(ElevationDataSource):
         return covering_tiles
     
     def _get_tile_dataset(self, tile_path: str):
-        """Get rasterio dataset for tile, with caching"""
+        """Get rasterio dataset for tile, with LRU caching"""
+        # Check if already open
         if tile_path in self.open_files:
+            # Move to end of LRU list
+            if tile_path in self.file_access_order:
+                self.file_access_order.remove(tile_path)
+            self.file_access_order.append(tile_path)
             return self.open_files[tile_path]
         
         # Close oldest files if we're at the limit
-        if len(self.open_files) >= self.max_open_files:
-            oldest_file = next(iter(self.open_files))
-            self.open_files[oldest_file].close()
-            del self.open_files[oldest_file]
+        while len(self.open_files) >= self.max_open_files:
+            if not self.file_access_order:
+                break
+            oldest_file = self.file_access_order.pop(0)
+            if oldest_file in self.open_files:
+                # Don't close preloaded tiles unless absolutely necessary
+                if oldest_file not in self.preloaded_tiles or len(self.open_files) >= self.max_open_files + 20:
+                    try:
+                        self.open_files[oldest_file].close()
+                    except Exception:
+                        pass
+                    del self.open_files[oldest_file]
         
         try:
             dataset = rasterio.open(tile_path)
             self.open_files[tile_path] = dataset
+            self.file_access_order.append(tile_path)
             return dataset
         except Exception as e:
             logger.error(f"Failed to open tile {tile_path}: {e}")
             return None
+    
+    def preload_tiles_for_area(self, center_lat: float, center_lon: float, radius_km: float = 2.0):
+        """Preload tiles for a specific area to improve batch processing performance"""
+        logger.info(f"Preloading tiles for area ({center_lat:.4f}, {center_lon:.4f}) with {radius_km}km radius...")
+        
+        # Calculate bounding box
+        lat_delta = radius_km / 111.0  # Rough conversion km to degrees
+        lon_delta = radius_km / (111.0 * abs(math.cos(math.radians(center_lat))))
+        
+        bounds = [
+            center_lon - lon_delta,  # west
+            center_lat - lat_delta,  # south
+            center_lon + lon_delta,  # east
+            center_lat + lat_delta   # north
+        ]
+        
+        # Find all tiles that intersect with this area
+        preload_count = 0
+        for tile_path, tile_info in self.tile_index.items():
+            tile_bounds = tile_info['bounds']
+            
+            # Check if tile intersects with area bounds
+            if (tile_bounds[2] >= bounds[0] and tile_bounds[0] <= bounds[2] and
+                tile_bounds[3] >= bounds[1] and tile_bounds[1] <= bounds[3]):
+                
+                try:
+                    dataset = self._get_tile_dataset(tile_path)
+                    if dataset:
+                        self.preloaded_tiles.add(tile_path)
+                        preload_count += 1
+                except Exception as e:
+                    logger.warning(f"Failed to preload tile {tile_path}: {e}")
+        
+        logger.info(f"Preloaded {preload_count} tiles for area")
+    
+    def _get_transformer(self, from_crs: str, to_crs: str):
+        """Get cached coordinate transformer"""
+        cache_key = (from_crs, to_crs)
+        if cache_key not in self.transformer_cache:
+            try:
+                import pyproj
+                self.transformer_cache[cache_key] = pyproj.Transformer.from_crs(from_crs, to_crs, always_xy=True)
+            except Exception as e:
+                logger.error(f"Failed to create transformer {from_crs} -> {to_crs}: {e}")
+                return None
+        return self.transformer_cache[cache_key]
     
     def get_elevation(self, lat: float, lon: float) -> Optional[float]:
         """Get elevation at a specific coordinate with enhanced caching"""
@@ -375,7 +516,11 @@ class LocalThreeDEPSource(ElevationDataSource):
     
     def _get_elevation_direct(self, lat: float, lon: float) -> Optional[float]:
         """Direct elevation lookup without caching (used as fallback)"""
-        covering_tiles = self._find_covering_tiles(lat, lon)
+        # Use fast spatial index if available, fallback to linear search
+        if self.spatial_index:
+            covering_tiles = self._find_covering_tiles_fast(lat, lon)
+        else:
+            covering_tiles = self._find_covering_tiles(lat, lon)
         
         if not covering_tiles:
             return None
@@ -389,9 +534,11 @@ class LocalThreeDEPSource(ElevationDataSource):
                 return None
             
             # Transform coordinates to tile CRS if needed
-            if src.crs.to_string() != 'EPSG:4326':
-                import pyproj
-                transformer = pyproj.Transformer.from_crs('EPSG:4326', src.crs, always_xy=True)
+            tile_crs = src.crs.to_string()
+            if tile_crs != 'EPSG:4326':
+                transformer = self._get_transformer('EPSG:4326', tile_crs)
+                if not transformer:
+                    return None
                 x, y = transformer.transform(lon, lat)
                 coords = [(x, y)]
             else:
@@ -423,12 +570,110 @@ class LocalThreeDEPSource(ElevationDataSource):
         return {"enhanced_caching": False}
     
     def get_elevation_profile(self, coordinates: List[Tuple[float, float]]) -> List[float]:
-        """Get elevation profile for a list of coordinates"""
-        elevations = []
+        """Get elevation profile for a list of coordinates with batch optimization"""
+        if not coordinates:
+            return []
         
-        for lat, lon in coordinates:
-            elevation = self.get_elevation(lat, lon)
-            elevations.append(elevation if elevation is not None else 0.0)
+        # Try batch processing if available
+        try:
+            return self._get_elevation_profile_batch(coordinates)
+        except Exception as e:
+            logger.warning(f"Batch processing failed, falling back to individual queries: {e}")
+            # Fallback to individual queries
+            elevations = []
+            for lat, lon in coordinates:
+                elevation = self.get_elevation(lat, lon)
+                elevations.append(elevation if elevation is not None else 0.0)
+            return elevations
+    
+    def _get_elevation_profile_batch(self, coordinates: List[Tuple[float, float]]) -> List[float]:
+        """Optimized batch elevation lookup"""
+        if not RASTERIO_AVAILABLE or not coordinates:
+            return []
+        
+        # Group coordinates by covering tiles to minimize file I/O
+        tile_groups = {}
+        coord_to_tiles = {}
+        
+        # First pass: find covering tiles for each coordinate
+        for i, (lat, lon) in enumerate(coordinates):
+            if self.spatial_index:
+                covering_tiles = self._find_covering_tiles_fast(lat, lon)
+            else:
+                covering_tiles = self._find_covering_tiles(lat, lon)
+            
+            coord_to_tiles[i] = covering_tiles
+            
+            # Group coordinates by tiles
+            for tile_path in covering_tiles:
+                if tile_path not in tile_groups:
+                    tile_groups[tile_path] = []
+                tile_groups[tile_path].append((i, lat, lon))
+        
+        # Initialize results array
+        elevations = [0.0] * len(coordinates)
+        
+        # Second pass: process coordinates by tile to maximize cache efficiency
+        for tile_path, coord_list in tile_groups.items():
+            try:
+                src = self._get_tile_dataset(tile_path)
+                if not src:
+                    continue
+                
+                # Prepare coordinate transformations
+                tile_crs = src.crs.to_string()
+                if tile_crs != 'EPSG:4326':
+                    transformer = self._get_transformer('EPSG:4326', tile_crs)
+                    if not transformer:
+                        continue
+                    
+                    # Batch transform coordinates
+                    lons = [coord[2] for coord in coord_list]
+                    lats = [coord[1] for coord in coord_list]
+                    xs, ys = transformer.transform(lons, lats)
+                    transformed_coords = [(xs[j], ys[j]) for j in range(len(coord_list))]
+                else:
+                    transformed_coords = [(coord[2], coord[1]) for coord in coord_list]  # (lon, lat)
+                
+                # Batch sample elevations
+                try:
+                    # Sample all coordinates at once
+                    sampled_elevations = list(src.sample(transformed_coords))
+                    
+                    for j, (coord_idx, lat, lon) in enumerate(coord_list):
+                        if j < len(sampled_elevations):
+                            elevation_array = sampled_elevations[j]
+                            if len(elevation_array) > 0:
+                                elevation = float(elevation_array[0])
+                                # Filter out nodata values
+                                if elevation != src.nodata and not (NUMPY_AVAILABLE and np.isnan(elevation)):
+                                    elevations[coord_idx] = elevation
+                
+                except Exception as e:
+                    logger.warning(f"Batch sampling failed for {tile_path}, falling back to individual: {e}")
+                    # Fallback to individual sampling for this tile
+                    for coord_idx, lat, lon in coord_list:
+                        try:
+                            if tile_crs != 'EPSG:4326':
+                                if transformer:
+                                    x, y = transformer.transform(lon, lat)
+                                    coords = [(x, y)]
+                                else:
+                                    continue
+                            else:
+                                coords = [(lon, lat)]
+                            
+                            elevation_array = list(src.sample(coords))[0]
+                            if len(elevation_array) > 0:
+                                elevation = float(elevation_array[0])
+                                if elevation != src.nodata and not (NUMPY_AVAILABLE and np.isnan(elevation)):
+                                    elevations[coord_idx] = elevation
+                        except Exception:
+                            continue
+                            
+            except Exception as e:
+                logger.warning(f"Failed to process tile {tile_path}: {e}")
+                continue
         
         return elevations
     

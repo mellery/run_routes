@@ -15,7 +15,7 @@ from enum import Enum
 import threading
 from collections import deque
 
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 
 
 class AdaptationStrategy(Enum):

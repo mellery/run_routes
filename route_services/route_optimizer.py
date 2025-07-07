@@ -88,33 +88,19 @@ class RouteOptimizer:
                 print("⚠️ Enhanced elevation system not available")
     
     def _initialize_solver(self):
-        """Initialize the best available TSP solver and GA optimizer"""
-        try:
-            from tsp_solver_fast import FastRunningRouteOptimizer
-            from tsp_solver_fast import RouteObjective
-            self._optimizer_class = FastRunningRouteOptimizer
-            self._route_objective = RouteObjective
-            self._solver_type = "fast"
-            if self.verbose:
-                print("✅ Using fast TSP solver (no distance matrix precomputation)")
-        except ImportError:
-            try:
-                from tsp_solver import RunningRouteOptimizer
-                from tsp_solver import RouteObjective
-                self._optimizer_class = RunningRouteOptimizer
-                self._route_objective = RouteObjective
-                self._solver_type = "standard"
-                if self.verbose:
-                    print("⚠️ Using standard TSP solver (with distance matrix)")
-            except ImportError:
-                raise ImportError("No TSP solver available. Please check tsp_solver modules.")
+        """Initialize the genetic algorithm optimizer"""
+        # Import RouteObjective from new module
+        from route_objective import RouteObjective
+        self._route_objective = RouteObjective
+        self._solver_type = "genetic"
         
-        # Initialize GA optimizer if available
+        # Initialize GA optimizer
         if GA_AVAILABLE:
             self._ga_optimizer = GeneticRouteOptimizer(self.graph)
-            print("✅ Genetic Algorithm optimizer available")
+            if self.verbose:
+                print("✅ Using Genetic Algorithm optimizer")
         else:
-            print("⚠️ Genetic Algorithm optimizer not available (import error)")
+            raise ImportError("Genetic Algorithm optimizer not available. Please check GA modules.")
     
     @property
     def RouteObjective(self):
@@ -169,11 +155,8 @@ class RouteOptimizer:
         print(f"   Exclude footways: {exclude_footways}")
         
         try:
-            # Route to appropriate optimization method
-            if selected_algorithm == "genetic":
-                return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways)
-            else:
-                return self._optimize_tsp(start_node, target_distance_km, objective, selected_algorithm, exclude_footways)
+            # Use genetic algorithm optimization
+            return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways)
                 
         except Exception as e:
             print(f"❌ Route generation failed: {e}")
@@ -198,7 +181,7 @@ class RouteOptimizer:
         Returns:
             List of algorithm names
         """
-        algorithms = ["nearest_neighbor", "auto"]
+        algorithms = ["auto"]
         if GA_AVAILABLE:
             algorithms.append("genetic")
         return algorithms
@@ -247,25 +230,17 @@ class RouteOptimizer:
         """Select optimal algorithm based on parameters
         
         Args:
-            algorithm: Requested algorithm ('auto', 'nearest_neighbor', 'genetic')
+            algorithm: Requested algorithm ('auto', 'genetic')
             objective: Route objective
             
         Returns:
-            Selected algorithm name
+            Selected algorithm name (always 'genetic')
         """
-        if algorithm == "auto":
-            # Auto-select based on objective and GA availability
-            if GA_AVAILABLE and objective in [self._route_objective.MAXIMIZE_ELEVATION, 
-                                            self._route_objective.BALANCED_ROUTE]:
-                return "genetic"
-            else:
-                return "nearest_neighbor"
-        elif algorithm == "genetic" and not GA_AVAILABLE:
-            if self.verbose:
-                print("⚠️ GA not available, falling back to nearest_neighbor")
-            return "nearest_neighbor"
-        else:
-            return algorithm
+        if not GA_AVAILABLE:
+            raise ImportError("Genetic Algorithm optimizer not available")
+        
+        # Always use genetic algorithm
+        return "genetic"
     
     def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str, exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
         """Optimize route using genetic algorithm
@@ -331,99 +306,6 @@ class RouteOptimizer:
                 print("❌ GA optimization returned no result")
             return None
     
-    def _optimize_tsp(self, start_node: int, target_distance_km: float, 
-                     objective: str, algorithm: str, exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
-        """Optimize route using TSP solver
-        
-        Args:
-            start_node: Starting node ID
-            target_distance_km: Target route distance in kilometers
-            objective: Route objective
-            algorithm: TSP algorithm to use
-            exclude_footways: Whether to exclude footway segments
-            
-        Returns:
-            Route result dictionary or None if optimization fails
-        """
-        # Filter graph if needed
-        working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
-        
-        # Apply intelligent candidate filtering for all algorithms when using standard solver
-        # (standard solver builds expensive distance matrix, fast solver computes on-demand)
-        if self._solver_type == "standard":
-            candidate_nodes = self._get_intersection_nodes(working_graph)
-            
-            # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
-            # Stage 1: Fast straight-line filtering to reduce candidate pool
-            max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
-            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km, working_graph)
-            
-            # Stage 2: Precise road distance filtering on reduced set
-            max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
-            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km, working_graph)
-            
-            if start_node not in filtered_candidates:
-                filtered_candidates.append(start_node)
-            
-            print(f"   Candidate nodes: {len(filtered_candidates)} nodes")
-            print(f"   Filtering stages: {len(candidate_nodes)} → {len(straight_line_filtered)} → {len(filtered_candidates)}")
-            print(f"   Max road distance: {max_road_distance_km:.1f}km for {target_distance_km:.1f}km target route")
-            print(f"   Distance matrix size: {len(filtered_candidates)}² = {len(filtered_candidates)**2:,} calculations")
-            
-            # Pass filtered candidates to standard solver
-            optimizer = self._optimizer_class(working_graph, candidate_nodes=filtered_candidates)
-        else:
-            # Fast solver: Apply same filtering to reduce search space for all algorithms
-            candidate_nodes = self._get_intersection_nodes(working_graph)
-            
-            # Two-stage filtering: straight-line distance first (fast), then road distance (precise)
-            # Stage 1: Fast straight-line filtering to reduce candidate pool
-            max_straight_line_km = (target_distance_km / 2.0) + 1.5  # Generous straight-line filter
-            straight_line_filtered = self._filter_nodes_by_distance(candidate_nodes, start_node, max_straight_line_km, working_graph)
-            
-            # Stage 2: Precise road distance filtering on reduced set
-            max_road_distance_km = (target_distance_km / 2.0) + 1.0  # +1km tolerance
-            filtered_candidates = self._filter_nodes_by_road_distance(straight_line_filtered, start_node, max_road_distance_km, working_graph)
-            
-            if start_node not in filtered_candidates:
-                filtered_candidates.append(start_node)
-            
-            print(f"   Candidate nodes: {len(filtered_candidates)} nodes")
-            print(f"   Filtering stages: {len(candidate_nodes)} → {len(straight_line_filtered)} → {len(filtered_candidates)}")
-            print(f"   Max road distance: {max_road_distance_km:.1f}km for {target_distance_km:.1f}km target route")
-            print(f"   Search space reduction: {len(candidate_nodes)/len(filtered_candidates):.1f}x")
-            
-            # Pass filtered candidates to fast solver for all algorithms
-            optimizer = self._optimizer_class(working_graph, filtered_candidates=filtered_candidates)
-        
-        # Record timing
-        start_time = time.time()
-        
-        # Run optimization
-        result = optimizer.find_optimal_route(
-            start_node=start_node,
-            target_distance_km=target_distance_km,
-            objective=objective,
-            algorithm=algorithm
-        )
-        
-        solve_time = time.time() - start_time
-        
-        if result:
-            print(f"✅ Route generated in {solve_time:.2f} seconds")
-            
-            # Add solver metadata
-            result['solver_info'] = {
-                'solver_type': self._solver_type,
-                'solve_time': solve_time,
-                'algorithm_used': algorithm,
-                'objective_used': str(objective)
-            }
-            
-            return result
-        else:
-            print("❌ Route optimization returned no result")
-            return None
     
     def _convert_tsp_to_ga_objective(self, tsp_objective: str) -> str:
         """Convert TSP objective to GA objective string

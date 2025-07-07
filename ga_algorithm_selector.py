@@ -15,7 +15,7 @@ from enum import Enum
 import threading
 from collections import deque, defaultdict
 
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 from ga_hyperparameter_optimizer import OptimizationMethod
 
 

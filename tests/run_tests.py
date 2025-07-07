@@ -288,8 +288,6 @@ def run_coverage_tests():
             "--cov=ga_parameter_tuning",
             "--cov=ga_performance",
             "--cov=route",
-            "--cov=tsp_solver",
-            "--cov=tsp_solver_fast",
             "--cov=graph_cache",
             "--cov-report=html:htmlcov",
             "--cov-report=xml:coverage.xml",
@@ -398,7 +396,7 @@ def main():
         print("  ga             - Run GA tests (genetic algorithm components)")
         print("  integration    - Run integration tests (mocked)")
         print("  ga-integration - Run GA integration tests (real dependencies)")
-        print("  benchmark      - Run benchmark tests (GA vs TSP performance)")
+        print("  benchmark      - Run benchmark tests (GA performance analysis)")
         print("  smoke          - Run smoke tests (real dependencies, slower)")
         print("  coverage       - Run tests with coverage reporting (pytest-cov)")
         print("  all            - Run all available tests")

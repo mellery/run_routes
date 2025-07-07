@@ -27,7 +27,7 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
     """
     
     if cache_file is None:
-        cache_file = f"cached_graph_{radius_m}m_{network_type}.pkl"
+        cache_file = f"cache/cached_graph_{radius_m}m_{network_type}.pkl"
     
     print(f"🌐 Generating cached graph for Christiansburg, VA...")
     print(f"   Parameters: {radius_m}m radius, {network_type} network")
@@ -83,6 +83,12 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         print(f"\n5️⃣ Saving processed graph to cache...")
         step_start = time.time()
         
+        # Analyze elevation data quality
+        elevations = [data.get('elevation', 0) for _, data in graph.nodes(data=True)]
+        has_elevation = any('elevation' in data for _, data in graph.nodes(data=True))
+        elevation_range = (min(elevations), max(elevations)) if elevations else (0, 0)
+        non_zero_elevations = sum(1 for e in elevations if e != 0)
+        
         # Create cache metadata
         cache_metadata = {
             'center_point': center_point,
@@ -92,7 +98,13 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
             'nodes_count': len(graph.nodes),
             'edges_count': len(graph.edges),
             'elevation_file': 'srtm_20_05.tif',
-            'enhanced_elevation': use_enhanced_elevation
+            'enhanced_elevation': use_enhanced_elevation,
+            'elevation_data_quality': {
+                'has_elevation': has_elevation,
+                'elevation_range': elevation_range,
+                'nodes_with_elevation': non_zero_elevations,
+                'elevation_coverage_percent': (non_zero_elevations / len(graph.nodes)) * 100 if graph.nodes else 0
+            }
         }
         
         # Save graph and metadata
@@ -100,6 +112,9 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
             'graph': graph,
             'metadata': cache_metadata
         }
+        
+        # Ensure cache directory exists
+        os.makedirs('cache', exist_ok=True)
         
         with open(cache_file, 'wb') as f:
             pickle.dump(cache_data, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -173,6 +188,20 @@ def load_cached_graph(cache_file):
         print(f"   Generated: {time.ctime(metadata['generated_at'])}")
         print(f"   Network: {metadata['radius_m']}m {metadata['network_type']}")
         print(f"   Stats: {metadata['nodes_count']} nodes, {metadata['edges_count']} edges")
+        
+        # Show elevation data quality if available
+        if 'elevation_data_quality' in metadata:
+            quality = metadata['elevation_data_quality']
+            if quality['has_elevation']:
+                coverage = quality['elevation_coverage_percent']
+                min_elev, max_elev = quality['elevation_range']
+                print(f"   Elevation: {coverage:.1f}% coverage, {min_elev:.0f}m - {max_elev:.0f}m range")
+                if metadata.get('enhanced_elevation', False):
+                    print(f"   Enhanced elevation: 3DEP 1m + SRTM 90m hybrid")
+                else:
+                    print(f"   Standard elevation: SRTM 90m resolution")
+            else:
+                print(f"   ⚠️ No elevation data in cache")
         
         return graph
         

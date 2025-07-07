@@ -18,7 +18,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
 from ga_parameter_tuner import GAParameterTuner, ParameterRange
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 
 
 class OptimizationMethod(Enum):

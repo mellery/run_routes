@@ -40,10 +40,9 @@ The project relies on several geospatial and data visualization libraries (avail
 
 ### Shared Route Services (`route_services/`)
 - **NetworkManager** - Graph loading, caching, node operations
-- **RouteOptimizer** - Multi-algorithm optimization (TSP + Genetic Algorithm)
-  - TSP solvers with automatic fast/standard fallback
-  - **NEW**: Genetic Algorithm with segment-based encoding
-  - Automatic algorithm selection based on objective
+- **RouteOptimizer** - Genetic Algorithm-based route optimization
+  - **Genetic Algorithm with segment-based encoding**
+  - Advanced population-based optimization for superior route quality
 - **RouteAnalyzer** - Route analysis, statistics, turn-by-turn directions
 - **ElevationProfiler** - Elevation profile generation and analysis (enhanced with 3DEP 1m precision)
 - **RouteFormatter** - Platform-agnostic output formatting
@@ -55,9 +54,6 @@ The project relies on several geospatial and data visualization libraries (avail
 
 ### Core Utilities
 - `route.py` - Core geospatial utility functions
-- **TSP Solvers:**
-  - `tsp_solver_fast.py` - Optimized TSP solver without distance matrix
-  - `tsp_solver.py` - Standard TSP solver with distance matrix
 - **Genetic Algorithm (✅ COMPLETED):**
   - `genetic_route_optimizer.py` - GA implementation with segment-based encoding
   - `ga_chromosome.py` - Route chromosome and segment representations
@@ -157,9 +153,9 @@ streamlit run running_route_app.py
 # Command Line Interface - Refactored with shared services  
 python cli_route_planner.py --interactive
 
-# Generate optimized route directly (NEW: with automatic algorithm selection)
-python cli_route_planner.py --start-node 1529188403 --distance 5.0 --objective elevation --algorithm auto
+# Generate optimized route directly (genetic algorithm)
 python cli_route_planner.py --start-node 1529188403 --distance 5.0 --objective elevation --algorithm genetic
+python cli_route_planner.py --start-node 1529188403 --distance 5.0 --objective elevation --algorithm auto
 
 # === TESTING ===
 # Run comprehensive test suite (90 tests, all passing)
@@ -267,6 +263,11 @@ python setup_cache.py                    # Generate common caches
 python graph_cache.py list              # List available caches  
 python graph_cache.py clean             # Clean old caches
 
+# Enhanced elevation cache generation (NEW: 3DEP 1m resolution support)
+python generate_cached_graph.py --radius 800 --enhanced-elevation     # Generate cache with 3DEP 1m elevation data
+python generate_cached_graph.py --radius 800 --no-enhanced-elevation  # Generate cache with SRTM 90m only
+python generate_cached_graph.py --radius 1200 --enhanced-elevation --force  # Force regenerate with 3DEP data
+
 # Core analysis
 python route.py                          # Basic network analysis
 
@@ -295,6 +296,7 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
 
 **Key Features Completed:**
 - ✅ **Zero Code Duplication**: ~800 lines eliminated via shared services
+- ✅ **Enhanced 3DEP Elevation Pre-computation**: 3DEP 1m elevation data is now pre-computed and stored statically in graph nodes during cache generation, eliminating recursion issues and runtime lookup overhead
 - ✅ **Comprehensive Testing**: 465+ tests (100% passing)
   - 285 unit tests (route services + GA, fast ~0.02s)
   - 7 integration tests (mocked workflows) 
@@ -346,23 +348,23 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
 
 **✅ COMPLETED: Week 6 - GA System Integration & Testing (Phase 3)**
 - ✅ **GA Production Integration**: Complete integration of GA into route planning system
-  - RouteOptimizer service with automatic TSP/GA algorithm selection
-  - CLI application with GA support and enhanced algorithm selection interface
-  - Streamlit web application with GA integration and intelligent algorithm recommendations
-  - Automatic algorithm selection logic: GA for elevation objectives, TSP for distance objectives
+  - RouteOptimizer service with genetic algorithm optimization
+  - CLI application with GA support and enhanced algorithm interface
+  - Streamlit web application with GA integration and intelligent optimization
+  - Genetic algorithm optimization for all route objectives
 - ✅ **Comprehensive Integration Test Suite**: Full testing framework for GA integration
-  - test_ga_integration.py: GA integration with route services (25+ tests)
-  - test_ga_real_world.py: Real-world GA testing with actual street networks (15+ tests)
-  - test_ga_vs_tsp_benchmark.py: Performance benchmarking suite with detailed metrics
+  - GA integration with route services
+  - Real-world GA testing with actual street networks
+  - Performance benchmarking suite with detailed metrics
   - Enhanced test runner with ga-integration and benchmark test categories
 - ✅ **Production Deployment Validation**: Ready for production use
   - GA available in both CLI (--algorithm genetic/auto) and web interfaces
-  - Graceful fallback to TSP when GA unavailable
+  - Robust genetic algorithm implementation
   - Real-world performance testing with memory usage and scalability analysis
-  - Algorithm comparison framework with automated benchmarking
+  - Performance benchmarking framework with automated testing
 - ✅ **Week 6 Development Verification**: Mandatory testing and visualization framework
   - week6_development_test.py: Complete verification framework for Week 6 milestones
-  - GA vs TSP comparison visualizations with performance metrics
+  - GA performance visualizations with detailed metrics
   - Real-world performance analysis with OpenStreetMap background
   - Application integration testing for CLI and web interfaces
   - Automated verification that GA integration is production-ready
@@ -373,9 +375,8 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
 **Default Settings:**
 - **Starting node:** 1529188403 (Christiansburg, VA)
 - **Distance:** 5.0km
-- **Solver:** Automatic algorithm selection (TSP/GA based on objective)
-  - TSP: fast/standard fallback for distance objectives
-  - GA: population-based search for elevation objectives
+- **Solver:** Genetic Algorithm-based optimization
+  - GA: population-based search for superior route optimization
 - **Network area:** 5.0km radius around (37.1299, -80.4094)
 
 **GA Development Settings:**

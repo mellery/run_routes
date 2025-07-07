@@ -159,7 +159,7 @@ def create_route_map(services, route_result):
         original_route = route_result['route']
         
         for i, intersection in enumerate(intersections):
-            # Only show original TSP waypoints + a few intermediate ones
+            # Only show original route waypoints + a few intermediate ones
             if intersection['node_id'] in original_route or i % 20 == 0:
                 if intersection['node_id'] != start_point['node_id']:  # Skip start point
                     marker_color = 'blue' if intersection['node_id'] in original_route else 'lightblue'
@@ -269,7 +269,7 @@ def main():
     
     # Show solver information
     solver_info = route_optimizer.get_solver_info()
-    st.sidebar.success(f"✅ Using {solver_info['solver_type']} TSP solver")
+    st.sidebar.success(f"✅ Using {solver_info['solver_type']} GA solver")
     
     # Target distance
     target_distance = st.sidebar.slider(
@@ -301,7 +301,7 @@ def main():
     # Algorithm selection
     algorithms = route_optimizer.get_available_algorithms()
     
-    # Find genetic algorithm index, fallback to auto, then nearest_neighbor
+    # Find genetic algorithm index, fallback to auto
     default_algorithm_index = 0
     if "genetic" in algorithms:
         default_algorithm_index = algorithms.index("genetic")
@@ -312,16 +312,14 @@ def main():
         "Algorithm",
         options=algorithms,
         index=default_algorithm_index,  # Default to genetic if available
-        help="Auto: Automatic selection • Nearest Neighbor: Fast TSP • Genetic: Advanced optimization"
+        help="Auto: Automatic selection • Genetic: Advanced genetic algorithm optimization"
     )
     
     # Show algorithm info
     if algorithm == "auto":
-        st.sidebar.info("🤖 Auto mode selects the best algorithm based on your objective")
+        st.sidebar.info("🤖 Auto mode uses genetic algorithm optimization")
     elif algorithm == "genetic":
-        st.sidebar.info("🧬 Genetic Algorithm: Slower but finds creative routes with better elevation profiles")
-    elif algorithm == "nearest_neighbor":
-        st.sidebar.info("⚡ Nearest Neighbor: Fast and reliable for distance-focused routes")
+        st.sidebar.info("🧬 Genetic Algorithm: Finds creative routes with optimized elevation profiles")
     
     # Footway filtering option
     exclude_footways = st.sidebar.checkbox(

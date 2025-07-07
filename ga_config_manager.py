@@ -15,7 +15,7 @@ from enum import Enum
 import threading
 from collections import defaultdict
 
-from tsp_solver_fast import RouteObjective
+from route_objective import RouteObjective
 from ga_parameter_tuner import ParameterRange
 
 

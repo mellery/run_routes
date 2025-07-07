@@ -91,7 +91,7 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
 def list_cached_graphs():
     """List all available cached graphs"""
     
-    cache_files = [f for f in os.listdir('.') if f.startswith('cached_graph_') and f.endswith('.pkl')]
+    cache_files = [f for f in os.listdir('cache') if f.startswith('cached_graph_') and f.endswith('.pkl')]
     
     if not cache_files:
         print("📁 No cached graphs found")
@@ -105,7 +105,7 @@ def list_cached_graphs():
         try:
             graph = load_cached_graph(cache_file)
             if graph is not None:
-                file_size_mb = os.path.getsize(cache_file) / (1024 * 1024)
+                file_size_mb = os.path.getsize(os.path.join('cache', cache_file)) / (1024 * 1024)
                 print(f"✅ {cache_file} ({file_size_mb:.1f}MB)")
                 valid_caches.append(cache_file)
             else:
@@ -119,7 +119,7 @@ def list_cached_graphs():
 def clean_cache(keep_latest=True):
     """Clean up old or invalid cache files"""
     
-    cache_files = [f for f in os.listdir('.') if f.startswith('cached_graph_') and f.endswith('.pkl')]
+    cache_files = [f for f in os.listdir('cache') if f.startswith('cached_graph_') and f.endswith('.pkl')]
     
     if not cache_files:
         print("📁 No cache files to clean")
@@ -129,7 +129,7 @@ def clean_cache(keep_latest=True):
     kept_count = 0
     
     # Sort by modification time (newest first)
-    cache_files.sort(key=lambda f: os.path.getmtime(f), reverse=True)
+    cache_files.sort(key=lambda f: os.path.getmtime(os.path.join('cache', f)), reverse=True)
     
     for i, cache_file in enumerate(cache_files):
         try:

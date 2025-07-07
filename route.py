@@ -93,6 +93,11 @@ def get_elevation_from_raster(raster_path, lat, lon):
 # Function to add elevation data to all nodes in the graph
 def add_elevation_to_graph(graph, raster_path):
     """Add elevation attribute to all nodes in the graph"""
+    # Check if elevation data already exists
+    if has_elevation_data(graph):
+        print("✅ Elevation data already exists in graph, skipping elevation loading")
+        return graph
+    
     print("Adding elevation data to graph nodes...")
     nodes_with_elevation = 0
     
@@ -111,44 +116,90 @@ def add_elevation_to_graph(graph, raster_path):
     print(f"Added elevation data to {nodes_with_elevation}/{len(graph.nodes)} nodes")
     return graph
 
-def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif'):
-    """Add high-resolution elevation data to graph nodes using 3DEP when available
+def _process_nodes_batch(graph, elevation_source, fallback_raster):
+    """Process nodes in batches for better performance"""
+    print("   Using batch processing for elevation data...")
     
-    Args:
-        graph: NetworkX graph
-        use_3dep: Whether to try using 3DEP data first
-        fallback_raster: SRTM raster file to use as fallback
-        
-    Returns:
-        Graph with enhanced elevation data
-    """
-    print("Adding enhanced elevation data to graph nodes...")
-    
-    elevation_manager = None
-    elevation_source = None
+    total_nodes = len(graph.nodes)
+    batch_size = min(1000, total_nodes)  # Process in batches of 1000
     nodes_with_3dep = 0
     nodes_with_srtm = 0
     nodes_with_fallback = 0
     
-    # Try to initialize 3DEP elevation source
-    if use_3dep:
-        try:
-            from elevation_data_sources import get_elevation_manager
-            elevation_manager = get_elevation_manager()
-            if elevation_manager:
-                available_sources = elevation_manager.get_available_sources()
-                if '3dep_local' in available_sources or '3dep' in available_sources:
-                    elevation_source = elevation_manager.get_elevation_source()
-                    print(f"   Using 3DEP 1m elevation data (primary)")
-                elif 'srtm' in available_sources:
-                    elevation_source = elevation_manager.get_elevation_source()
-                    print(f"   Using SRTM elevation data from manager")
-        except Exception as e:
-            print(f"   ⚠️ 3DEP initialization failed: {e}")
-            elevation_manager = None
-            elevation_source = None
+    node_list = list(graph.nodes(data=True))
     
-    # Process all nodes
+    # Preload tiles for the graph area if supported
+    if hasattr(elevation_source, 'preload_tiles_for_area'):
+        try:
+            # Calculate graph bounds
+            lats = [data['y'] for _, data in node_list]
+            lons = [data['x'] for _, data in node_list]
+            center_lat = (min(lats) + max(lats)) / 2
+            center_lon = (min(lons) + max(lons)) / 2
+            
+            # Estimate radius from bounds
+            lat_range = max(lats) - min(lats)
+            lon_range = max(lons) - min(lons)
+            radius_km = max(lat_range, lon_range) * 111.0 / 2  # Convert degrees to km
+            
+            print(f"   Preloading elevation tiles for {radius_km:.1f}km radius...")
+            elevation_source.preload_tiles_for_area(center_lat, center_lon, radius_km)
+        except Exception as e:
+            print(f"   ⚠️ Tile preloading failed: {e}")
+    
+    for batch_start in range(0, total_nodes, batch_size):
+        batch_end = min(batch_start + batch_size, total_nodes)
+        batch_nodes = node_list[batch_start:batch_end]
+        
+        # Extract coordinates for batch
+        coordinates = [(node_data['y'], node_data['x']) for node_id, node_data in batch_nodes]
+        
+        # Batch query elevation source
+        try:
+            elevations = elevation_source.get_elevation_profile(coordinates)
+        except Exception as e:
+            print(f"   ⚠️ Batch elevation query failed: {e}")
+            elevations = [None] * len(coordinates)
+        
+        # Process batch results
+        for i, (node_id, node_data) in enumerate(batch_nodes):
+            elevation = elevations[i] if i < len(elevations) and elevations[i] is not None else None
+            
+            if elevation is not None and elevation != 0.0:
+                nodes_with_3dep += 1
+            else:
+                # Fallback to SRTM if needed
+                if fallback_raster and os.path.exists(fallback_raster):
+                    elevation = get_elevation_from_raster(fallback_raster, node_data['y'], node_data['x'])
+                    if elevation is not None:
+                        nodes_with_srtm += 1
+                    else:
+                        elevation = 0.0
+                        nodes_with_fallback += 1
+                else:
+                    elevation = 0.0
+                    nodes_with_fallback += 1
+            
+            graph.nodes[node_id]['elevation'] = elevation
+        
+        # Progress update
+        percent = int((batch_end / total_nodes) * 100)
+        if percent % 10 == 0 or batch_end == total_nodes:
+            print(f"   Progress: {percent}% ({batch_end:,}/{total_nodes:,} nodes)")
+    
+    return nodes_with_3dep, nodes_with_srtm, nodes_with_fallback
+
+def _process_nodes_individual(graph, elevation_source, fallback_raster):
+    """Process nodes individually (fallback method)"""
+    print("   Using individual processing for elevation data...")
+    
+    total_nodes = len(graph.nodes)
+    nodes_processed = 0
+    last_percent = -1
+    nodes_with_3dep = 0
+    nodes_with_srtm = 0
+    nodes_with_fallback = 0
+    
     for node_id, node_data in graph.nodes(data=True):
         lat = node_data['y']
         lon = node_data['x']
@@ -175,6 +226,102 @@ def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_
             nodes_with_fallback += 1
         
         graph.nodes[node_id]['elevation'] = elevation
+        
+        # Update progress indicator
+        nodes_processed += 1
+        percent = int((nodes_processed / total_nodes) * 100)
+        if percent != last_percent and percent % 10 == 0:  # Show every 10%
+            print(f"   Progress: {percent}% ({nodes_processed:,}/{total_nodes:,} nodes)")
+            last_percent = percent
+    
+    return nodes_with_3dep, nodes_with_srtm, nodes_with_fallback
+
+def has_elevation_data(graph):
+    """Check if graph already has elevation data
+    
+    Args:
+        graph: NetworkX graph
+        
+    Returns:
+        True if graph has elevation data for nodes
+    """
+    if not graph or len(graph.nodes) == 0:
+        return False
+    
+    # Check first few nodes for elevation data
+    sample_size = min(10, len(graph.nodes))
+    sample_nodes = list(graph.nodes(data=True))[:sample_size]
+    
+    for node_id, data in sample_nodes:
+        if 'elevation' not in data:
+            return False
+    
+    return True
+
+def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif'):
+    """Add high-resolution elevation data to graph nodes using 3DEP when available
+    
+    Args:
+        graph: NetworkX graph
+        use_3dep: Whether to try using 3DEP data first
+        fallback_raster: SRTM raster file to use as fallback
+        
+    Returns:
+        Graph with enhanced elevation data
+    """
+    # Check if elevation data already exists
+    if has_elevation_data(graph):
+        print("✅ Elevation data already exists in graph, skipping elevation loading")
+        return graph
+    
+    print("Adding enhanced elevation data to graph nodes...")
+    
+    elevation_manager = None
+    elevation_source = None
+    nodes_with_3dep = 0
+    nodes_with_srtm = 0
+    nodes_with_fallback = 0
+    
+    # Try to initialize 3DEP elevation source
+    if use_3dep:
+        try:
+            from elevation_data_sources import get_elevation_manager
+            elevation_manager = get_elevation_manager()
+            if elevation_manager:
+                available_sources = elevation_manager.get_available_sources()
+                if '3dep_local' in available_sources or '3dep' in available_sources:
+                    elevation_source = elevation_manager.get_elevation_source()
+                    print(f"   Using 3DEP 1m elevation data (primary)")
+                elif 'srtm' in available_sources:
+                    elevation_source = elevation_manager.get_elevation_source()
+                    print(f"   Using SRTM elevation data from manager")
+        except Exception as e:
+            print(f"   ⚠️ 3DEP initialization failed: {e}")
+            elevation_manager = None
+            elevation_source = None
+    
+    # Process all nodes with batch optimization and progress indicator
+    total_nodes = len(graph.nodes)
+    
+    # Try batch processing if elevation source supports it
+    try:
+        if elevation_source and hasattr(elevation_source, 'get_elevation_profile'):
+            nodes_with_3dep, nodes_with_srtm, nodes_with_fallback = _process_nodes_batch(
+                graph, elevation_source, fallback_raster
+            )
+        else:
+            # Fallback to individual processing
+            nodes_with_3dep, nodes_with_srtm, nodes_with_fallback = _process_nodes_individual(
+                graph, elevation_source, fallback_raster
+            )
+    except Exception as e:
+        print(f"   ⚠️ Batch processing failed, using individual processing: {e}")
+        nodes_with_3dep, nodes_with_srtm, nodes_with_fallback = _process_nodes_individual(
+            graph, elevation_source, fallback_raster
+        )
+    
+    # Show final progress
+    print(f"   Progress: 100% ({total_nodes:,}/{total_nodes:,} nodes) - Complete!")
     
     # Clean up elevation manager
     if elevation_manager:
