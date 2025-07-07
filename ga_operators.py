@@ -746,6 +746,88 @@ class GAOperators:
         repaired_chromosome.generation = chromosome.generation
         
         return repaired_chromosome
+    
+    # =============================================================================
+    # POPULATION FILTERING AND SURVIVAL SELECTION
+    # =============================================================================
+    
+    def survival_selection(self, population: List[RouteChromosome], 
+                          fitness_scores: List[float],
+                          survival_rate: float = 0.8,
+                          min_fitness_threshold: float = 0.1) -> Tuple[List[RouteChromosome], List[float]]:
+        """Remove worst performers from population using combined fitness and threshold filtering
+        
+        Args:
+            population: Population to filter
+            fitness_scores: Corresponding fitness scores
+            survival_rate: Fraction of population to keep (0.0 - 1.0)
+            min_fitness_threshold: Minimum fitness threshold for survival
+            
+        Returns:
+            Tuple of (surviving_chromosomes, surviving_fitness_scores)
+        """
+        if not population or not fitness_scores:
+            return population, fitness_scores
+        
+        if len(population) != len(fitness_scores):
+            raise ValueError("Population and fitness_scores must have same length")
+        
+        # Step 1: Filter by minimum fitness threshold
+        viable_pairs = [(chromo, fitness) for chromo, fitness in zip(population, fitness_scores)
+                       if fitness >= min_fitness_threshold]
+        
+        # If too few viable chromosomes, lower threshold and keep best available
+        min_required = max(5, int(len(population) * 0.2))  # Keep at least 20% or 5 chromosomes
+        
+        if len(viable_pairs) < min_required:
+            # Sort all chromosomes by fitness and keep best ones
+            all_pairs = list(zip(population, fitness_scores))
+            all_pairs.sort(key=lambda x: x[1], reverse=True)  # Sort by fitness descending
+            viable_pairs = all_pairs[:min_required]
+        
+        # Step 2: Apply survival rate selection
+        target_survivors = max(min_required, int(len(population) * survival_rate))
+        target_survivors = min(target_survivors, len(viable_pairs))  # Can't exceed available
+        
+        # Sort viable pairs by fitness (best first) and select top survivors
+        viable_pairs.sort(key=lambda x: x[1], reverse=True)
+        survivors = viable_pairs[:target_survivors]
+        
+        # Separate chromosomes and fitness scores
+        surviving_chromosomes = [pair[0] for pair in survivors]
+        surviving_fitness_scores = [pair[1] for pair in survivors]
+        
+        return surviving_chromosomes, surviving_fitness_scores
+    
+    def fitness_threshold_filter(self, population: List[RouteChromosome], 
+                                fitness_scores: List[float],
+                                min_fitness: float = 0.1) -> Tuple[List[RouteChromosome], List[float]]:
+        """Filter population by minimum fitness threshold
+        
+        Args:
+            population: Population to filter
+            fitness_scores: Corresponding fitness scores
+            min_fitness: Minimum fitness threshold
+            
+        Returns:
+            Tuple of (filtered_chromosomes, filtered_fitness_scores)
+        """
+        if not population or not fitness_scores:
+            return population, fitness_scores
+        
+        filtered_pairs = [(chromo, fitness) for chromo, fitness in zip(population, fitness_scores)
+                         if fitness >= min_fitness]
+        
+        # Ensure we keep at least some chromosomes
+        if not filtered_pairs:
+            # If no chromosomes meet threshold, keep the best available
+            best_idx = fitness_scores.index(max(fitness_scores))
+            filtered_pairs = [(population[best_idx], fitness_scores[best_idx])]
+        
+        filtered_chromosomes = [pair[0] for pair in filtered_pairs]
+        filtered_fitness_scores = [pair[1] for pair in filtered_pairs]
+        
+        return filtered_chromosomes, filtered_fitness_scores
 
 
 def test_ga_operators():

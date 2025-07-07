@@ -171,8 +171,8 @@ class PopulationInitializer:
             visited_nodes.add(next_node)
             current_node = next_node
             
-            # Stop if we're getting close to target distance (more flexible threshold)
-            if total_distance >= target_distance_m * 0.8:  # 80% of target distance
+            # Stop if we're getting close to target distance (tighter threshold)
+            if total_distance >= target_distance_m * 0.95:  # 95% of target distance
                 break
         
         # Return to start if not already there
@@ -252,6 +252,10 @@ class PopulationInitializer:
             total_distance += segment.length
             current_node = best_neighbor
             
+            # Stop if we're getting close to target distance (tighter threshold)
+            if total_distance >= target_distance_m * 0.95:  # 95% of target distance
+                break
+            
             # After going in preferred direction for a while, allow turns
             if len(segments) > 3 and random.random() < 0.4:
                 # Allow 90-degree turns
@@ -323,6 +327,10 @@ class PopulationInitializer:
             segments.append(segment)
             total_distance += segment.length
             current_node = next_node
+            
+            # Stop if we're getting close to target distance (tighter threshold)
+            if total_distance >= target_distance_m * 0.95:  # 95% of target distance
+                break
             
             # Occasionally allow descent to find more climbs
             if len(segments) > 2 and random.random() < 0.3:

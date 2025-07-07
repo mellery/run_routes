@@ -150,14 +150,33 @@ class GAFitnessEvaluator:
         if self.enable_micro_terrain and graph:
             micro_terrain_score = self._calculate_micro_terrain_score(chromosome, graph)
         
-        # Combine scores using weights
-        fitness = (
-            distance_score * self.weights['distance_penalty'] +
-            elevation_score * self.weights['elevation_reward'] +
-            connectivity_score * self.weights['connectivity_bonus'] +
-            diversity_score * self.weights['diversity_bonus'] +
-            micro_terrain_score * self.weights['micro_terrain_bonus']
-        )
+        # Apply hard distance constraint BEFORE combining other scores
+        stats = chromosome.get_route_stats() if hasattr(chromosome, 'get_route_stats') else {'total_distance_km': 0}
+        route_distance_km = stats.get('total_distance_km', 0)
+        
+        # Hard constraint: routes outside 85%-115% range get maximum 0.05 fitness
+        if (route_distance_km > self.target_distance_km * 1.15 or 
+            route_distance_km < self.target_distance_km * 0.85):
+            # Severely limit fitness for distance violations
+            max_fitness = 0.05  # Even lower than the 0.1 filtering threshold
+            
+            # Still calculate other components but scale them down dramatically
+            other_fitness = (
+                elevation_score * self.weights['elevation_reward'] +
+                connectivity_score * self.weights['connectivity_bonus'] +
+                diversity_score * self.weights['diversity_bonus'] +
+                micro_terrain_score * self.weights['micro_terrain_bonus']
+            )
+            fitness = min(max_fitness, other_fitness * 0.1)  # Scale down by 90%
+        else:
+            # Normal fitness calculation for distance-compliant routes
+            fitness = (
+                distance_score * self.weights['distance_penalty'] +
+                elevation_score * self.weights['elevation_reward'] +
+                connectivity_score * self.weights['connectivity_bonus'] +
+                diversity_score * self.weights['diversity_bonus'] +
+                micro_terrain_score * self.weights['micro_terrain_bonus']
+            )
         
         # Normalize to 0-1 range
         fitness = max(0.0, min(1.0, fitness))
@@ -192,21 +211,26 @@ class GAFitnessEvaluator:
         return fitness_scores
     
     def _calculate_distance_score(self, distance_km: float) -> float:
-        """Calculate distance-based score component"""
+        """Calculate distance-based score component with hard constraints"""
         if distance_km <= 0:
             return 0.0
         
-        # Penalty for distance deviation from target
+        # Hard constraint: severely penalize routes > 115% of target or < 85% of target
+        if distance_km > self.target_distance_km * 1.15 or distance_km < self.target_distance_km * 0.85:
+            return 0.01  # Nearly zero fitness for extreme deviations
+        
+        # Penalty for distance deviation from target (tighter constraints)
         distance_error = abs(distance_km - self.target_distance_km)
-        distance_tolerance = self.target_distance_km * 0.1  # 10% tolerance
+        distance_tolerance = self.target_distance_km * 0.05  # 5% tolerance (reduced from 10%)
         
         if distance_error <= distance_tolerance:
             # Within tolerance - high score
-            return 1.0 - (distance_error / distance_tolerance) * 0.1
+            return 1.0 - (distance_error / distance_tolerance) * 0.2
         else:
-            # Outside tolerance - exponential penalty
+            # Outside tolerance - severe exponential penalty
             excess_ratio = (distance_error - distance_tolerance) / self.target_distance_km
-            return max(0.0, 0.9 - excess_ratio * 2.0)
+            penalty = min(0.95, excess_ratio * 4.0)  # Increased penalty multiplier
+            return max(0.0, 0.8 - penalty)
     
     def _calculate_elevation_score(self, elevation_gain_m: float, max_grade_percent: float) -> float:
         """Calculate elevation-based score component"""

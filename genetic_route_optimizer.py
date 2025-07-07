@@ -186,9 +186,13 @@ class GeneticRouteOptimizer:
         self.best_generation = 0
         
         if self.config.verbose:
+            initial_stats = self.best_chromosome.get_route_stats()
+            initial_distance = initial_stats['total_distance_km']
+            initial_elevation = initial_stats['total_elevation_gain_m']
             print(f"✅ Initial population created")
             print(f"   Best fitness: {self.best_fitness:.4f}")
             print(f"   Average fitness: {sum(fitness_scores)/len(fitness_scores):.4f}")
+            print(f"   Best distance: {initial_distance:.2f}km, elevation: {initial_elevation:.0f}m")
         
         # Generate initial visualization
         if visualizer:
@@ -226,8 +230,12 @@ class GeneticRouteOptimizer:
             # Progress reporting
             if self.config.verbose:
                 avg_fitness = sum(fitness_scores) / len(fitness_scores)
+                best_stats = self.best_chromosome.get_route_stats()
+                best_distance = best_stats['total_distance_km']
+                best_elevation = best_stats['total_elevation_gain_m']
                 print(f"   Gen {generation:3d}: Best={self.best_fitness:.4f}, "
-                      f"Avg={avg_fitness:.4f}, Time={gen_time:.2f}s")
+                      f"Avg={avg_fitness:.4f}, Dist={best_distance:.2f}km, "
+                      f"Elev={best_elevation:.0f}m, Time={gen_time:.2f}s")
             
             # Generation callback
             if self.generation_callback:
@@ -431,7 +439,12 @@ class GeneticRouteOptimizer:
             new_population, self.fitness_evaluator.objective.value, self.fitness_evaluator.target_distance_km
         )
         
-        return new_population, new_fitness_scores
+        # Apply population filtering to remove poor performers
+        filtered_population, filtered_fitness_scores = self._apply_population_filtering(
+            new_population, new_fitness_scores
+        )
+        
+        return filtered_population, filtered_fitness_scores
     
     def _check_convergence(self, fitness_scores: List[float]) -> bool:
         """Check if population has converged"""
@@ -450,6 +463,67 @@ class GeneticRouteOptimizer:
         improvement = max_recent - min_recent
         
         return improvement < self.config.convergence_threshold
+    
+    def _apply_population_filtering(self, population: List[RouteChromosome], 
+                                   fitness_scores: List[float]) -> Tuple[List[RouteChromosome], List[float]]:
+        """Apply population filtering to remove poor performers
+        
+        Args:
+            population: Population to filter
+            fitness_scores: Corresponding fitness scores
+            
+        Returns:
+            Tuple of (filtered_population, filtered_fitness_scores)
+        """
+        if not population or not fitness_scores:
+            return population, fitness_scores
+        
+        original_size = len(population)
+        
+        # Apply survival selection with fitness threshold
+        filtered_population, filtered_fitness_scores = self.operators.survival_selection(
+            population, fitness_scores,
+            survival_rate=0.8,  # Keep 80% of population
+            min_fitness_threshold=0.1  # Remove chromosomes with fitness < 0.1
+        )
+        
+        # If population became too small, replenish with new random chromosomes
+        if len(filtered_population) < self.config.population_size * 0.5:
+            needed = self.config.population_size - len(filtered_population)
+            
+            if self.config.verbose:
+                print(f"   ⚠️ Population heavily filtered ({original_size} → {len(filtered_population)})")
+                print(f"   🔄 Generating {needed} new chromosomes to maintain diversity")
+            
+            # Generate new chromosomes to maintain population size
+            try:
+                new_chromosomes = self.population_initializer.create_population(
+                    needed, self.fitness_evaluator.target_distance_km
+                )
+                
+                if new_chromosomes:
+                    # Evaluate new chromosomes
+                    new_fitness_scores = self.fitness_evaluator.evaluate_population(new_chromosomes, self.graph)
+                    
+                    # Add to filtered population
+                    filtered_population.extend(new_chromosomes)
+                    filtered_fitness_scores.extend(new_fitness_scores)
+                    
+            except Exception as e:
+                if self.config.verbose:
+                    print(f"   ⚠️ Failed to generate new chromosomes: {e}")
+        
+        # Ensure we don't exceed target population size
+        if len(filtered_population) > self.config.population_size:
+            # Keep best chromosomes if we have too many
+            combined = list(zip(filtered_population, filtered_fitness_scores))
+            combined.sort(key=lambda x: x[1], reverse=True)  # Sort by fitness descending
+            combined = combined[:self.config.population_size]
+            
+            filtered_population = [x[0] for x in combined]
+            filtered_fitness_scores = [x[1] for x in combined]
+        
+        return filtered_population, filtered_fitness_scores
     
     def _generate_visualization(self, population: List[RouteChromosome], 
                               fitness_scores: List[float], generation: int, visualizer: Any):
