@@ -21,6 +21,7 @@ from ga_chromosome import RouteChromosome
 from ga_population import PopulationInitializer
 from ga_operators import GAOperators
 from ga_fitness import GAFitnessEvaluator, FitnessObjective
+from ga_segment_cache import GASegmentCache
 
 # Enhanced 1m precision components
 try:
@@ -87,6 +88,9 @@ class GeneticRouteOptimizer:
         """
         self.graph = graph
         self.config = config or GAConfig()
+        
+        # Initialize segment cache for performance optimization
+        self.segment_cache = GASegmentCache(max_size=5000)
         
         # Initialize components
         self.population_initializer = None
@@ -225,7 +229,7 @@ class GeneticRouteOptimizer:
             self.fitness_history.append(fitness_scores.copy())
             
             # Progress reporting
-            if self.config.verbose and generation % 10 == 0:
+            if self.config.verbose:
                 avg_fitness = sum(fitness_scores) / len(fitness_scores)
                 print(f"   Gen {generation:3d}: Best={self.best_fitness:.4f}, "
                       f"Avg={avg_fitness:.4f}, Time={gen_time:.2f}s")
@@ -310,6 +314,14 @@ class GeneticRouteOptimizer:
             print(f"   Total time: {total_time:.2f}s")
             print(f"   Convergence: {convergence_reason}")
             
+            # Report segment cache performance
+            cache_info = self.segment_cache.get_cache_info()
+            if cache_info['total_requests'] > 0:
+                print(f"⚡ Segment Cache Performance:")
+                print(f"   Cache hits: {cache_info['cache_hits']:,} / {cache_info['total_requests']:,} ({cache_info['hit_rate_percent']:.1f}%)")
+                print(f"   Time saved: {cache_info.get('total_time_saved_seconds', 0):.2f}s")
+                print(f"   Segments cached: {cache_info['cache_size']:,}")
+            
             # Report precision benefits if available
             if (self.precision_components_enabled and results.precision_benefits):
                 benefits = results.precision_benefits
@@ -328,8 +340,8 @@ class GeneticRouteOptimizer:
         # Initialize population initializer
         self.population_initializer = PopulationInitializer(self.graph, start_node)
         
-        # Initialize fitness evaluator
-        self.fitness_evaluator = GAFitnessEvaluator(objective, distance_km)
+        # Initialize fitness evaluator with segment cache
+        self.fitness_evaluator = GAFitnessEvaluator(objective, distance_km, self.segment_cache)
         
         # Reset tracking
         self.generation = 0
@@ -409,7 +421,7 @@ class GeneticRouteOptimizer:
             return fitness_scores
         else:
             # Use standard fitness evaluation
-            return self.fitness_evaluator.evaluate_population(population)
+            return self.fitness_evaluator.evaluate_population(population, self.graph)
     
     def _chromosome_to_coordinates(self, chromosome: RouteChromosome) -> List[Tuple[float, float]]:
         """Convert chromosome route to coordinate list

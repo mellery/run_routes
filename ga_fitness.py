@@ -8,8 +8,10 @@ import math
 from typing import List, Dict, Any, Optional
 from enum import Enum
 import numpy as np
+import networkx as nx
 
 from ga_chromosome import RouteChromosome
+from ga_segment_cache import GASegmentCache, get_global_segment_cache
 
 
 class FitnessObjective(Enum):
@@ -24,16 +26,21 @@ class FitnessObjective(Enum):
 class GAFitnessEvaluator:
     """Fitness evaluation system for genetic algorithm route optimization"""
     
-    def __init__(self, objective: str = "elevation", target_distance_km: float = 5.0):
+    def __init__(self, objective: str = "elevation", target_distance_km: float = 5.0, 
+                 segment_cache: Optional[GASegmentCache] = None):
         """Initialize fitness evaluator
         
         Args:
             objective: Primary optimization objective
             target_distance_km: Target route distance in kilometers
+            segment_cache: Optional segment cache for performance optimization
         """
         self.objective = FitnessObjective(objective.lower())
         self.target_distance_km = target_distance_km
         self.target_distance_m = target_distance_km * 1000
+        
+        # Segment cache for performance optimization
+        self.segment_cache = segment_cache or get_global_segment_cache()
         
         # Fitness weights for different objectives
         self.weights = self._get_objective_weights()
@@ -89,11 +96,12 @@ class GAFitnessEvaluator:
                 'diversity_bonus': 0.1
             }
     
-    def evaluate_chromosome(self, chromosome: RouteChromosome) -> float:
+    def evaluate_chromosome(self, chromosome: RouteChromosome, graph: Optional[nx.Graph] = None) -> float:
         """Evaluate fitness of a single chromosome
         
         Args:
             chromosome: Chromosome to evaluate
+            graph: Network graph for cached calculations (optional)
             
         Returns:
             Fitness score (0.0 - 1.0, higher is better)
@@ -102,8 +110,12 @@ class GAFitnessEvaluator:
             chromosome.fitness = 0.0
             return 0.0
         
-        # Calculate base metrics
-        stats = chromosome.get_route_stats()
+        # Calculate base metrics using cached segment properties
+        if graph and self.segment_cache:
+            stats = self.segment_cache.get_chromosome_properties(chromosome, graph)
+        else:
+            # Fallback to chromosome's built-in calculation
+            stats = chromosome.get_route_stats()
         
         # Distance component
         distance_score = self._calculate_distance_score(stats['total_distance_km'])
@@ -142,11 +154,12 @@ class GAFitnessEvaluator:
         
         return fitness
     
-    def evaluate_population(self, population: List[RouteChromosome]) -> List[float]:
+    def evaluate_population(self, population: List[RouteChromosome], graph: Optional[nx.Graph] = None) -> List[float]:
         """Evaluate fitness of entire population
         
         Args:
             population: Population to evaluate
+            graph: Network graph for cached calculations (optional)
             
         Returns:
             List of fitness scores
@@ -154,7 +167,7 @@ class GAFitnessEvaluator:
         fitness_scores = []
         
         for chromosome in population:
-            fitness = self.evaluate_chromosome(chromosome)
+            fitness = self.evaluate_chromosome(chromosome, graph)
             fitness_scores.append(fitness)
         
         return fitness_scores
