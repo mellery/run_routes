@@ -51,20 +51,23 @@ class TestGAFitness(unittest.TestCase):
         # Test elevation objective
         elev_evaluator = GAFitnessEvaluator("elevation", 5.0)
         elev_weights = elev_evaluator.weights
-        self.assertEqual(elev_weights['elevation_reward'], 0.5)
-        self.assertEqual(elev_weights['distance_penalty'], 0.2)
+        self.assertEqual(elev_weights['elevation_reward'], 0.4)
+        self.assertEqual(elev_weights['distance_penalty'], 0.15)
+        self.assertEqual(elev_weights['micro_terrain_bonus'], 0.15)
         
         # Test distance objective
         dist_evaluator = GAFitnessEvaluator("distance", 5.0)
         dist_weights = dist_evaluator.weights
         self.assertEqual(dist_weights['distance_penalty'], 0.6)
         self.assertEqual(dist_weights['elevation_reward'], 0.1)
+        self.assertEqual(dist_weights['micro_terrain_bonus'], 0.0)
         
         # Test balanced objective
         bal_evaluator = GAFitnessEvaluator("balanced", 5.0)
         bal_weights = bal_evaluator.weights
-        self.assertEqual(bal_weights['distance_penalty'], 0.3)
-        self.assertEqual(bal_weights['elevation_reward'], 0.3)
+        self.assertEqual(bal_weights['distance_penalty'], 0.25)
+        self.assertEqual(bal_weights['elevation_reward'], 0.25)
+        self.assertEqual(bal_weights['micro_terrain_bonus'], 0.1)
     
     def test_chromosome_fitness_evaluation(self):
         """Test single chromosome fitness evaluation"""

@@ -21,7 +21,7 @@ except ImportError:
     ADVANCED_MAPPING_AVAILABLE = False
 
 try:
-    from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator
+    # from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator  # Removed - functionality integrated into ga_fitness
     from ga_precision_operators import PrecisionAwareCrossover, PrecisionAwareMutation
     PRECISION_COMPONENTS_AVAILABLE = True
 except ImportError:

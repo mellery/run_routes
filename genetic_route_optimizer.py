@@ -23,9 +23,8 @@ from ga_operators import GAOperators
 from ga_fitness import GAFitnessEvaluator, FitnessObjective
 from ga_segment_cache import GASegmentCache
 
-# Enhanced 1m precision components
+# Enhanced 1m precision components (removed ga_precision_fitness - now integrated into ga_fitness)
 try:
-    from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator
     from ga_precision_operators import PrecisionAwareCrossover, PrecisionAwareMutation
     from ga_precision_visualizer import PrecisionComparisonVisualizer
     PRECISION_ENHANCEMENT_AVAILABLE = True
@@ -103,10 +102,8 @@ class GeneticRouteOptimizer:
                                            not os.environ.get('DISABLE_PRECISION_ENHANCEMENT', False))
         
         if self.precision_components_enabled:
-            self.precision_analyzer = PrecisionElevationAnalyzer()
-            self.enhanced_fitness_evaluator = EnhancedGAFitnessEvaluator(graph, enable_micro_terrain=True)
-            self.precision_crossover = PrecisionAwareCrossover(graph, self.precision_analyzer)
-            self.precision_mutation = PrecisionAwareMutation(graph, self.precision_analyzer)
+            self.precision_crossover = PrecisionAwareCrossover(graph)
+            self.precision_mutation = PrecisionAwareMutation(graph)
             
             if self.config.generate_precision_visualizations:
                 self.precision_visualizer = PrecisionComparisonVisualizer()
@@ -115,8 +112,6 @@ class GeneticRouteOptimizer:
                 self.precision_visualizer = None
                 self.precision_visualizations = []
         else:
-            self.precision_analyzer = None
-            self.enhanced_fitness_evaluator = None
             self.precision_crossover = None
             self.precision_mutation = None
             self.precision_visualizer = None
@@ -280,16 +275,7 @@ class GeneticRouteOptimizer:
             # Generate final precision analysis
             best_route_coords = self._chromosome_to_coordinates(self.best_chromosome)
             
-            if self.enhanced_fitness_evaluator:
-                try:
-                    precision_comparison = self.enhanced_fitness_evaluator.compare_precision_benefits(
-                        best_route_coords
-                    )
-                    results.precision_benefits = precision_comparison.get('precision_benefits', {})
-                    results.micro_terrain_features = precision_comparison.get('high_resolution', {}).get('elevation_profile', {}).get('micro_terrain_features', {})
-                    results.elevation_profile_comparison = precision_comparison
-                except Exception as e:
-                    logger.warning(f"Failed to generate precision comparison: {e}")
+            # Precision comparison functionality removed - micro-terrain analysis now integrated into main fitness evaluator
             
             # Add precision visualizations
             if self.precision_visualizations:
@@ -341,7 +327,7 @@ class GeneticRouteOptimizer:
         self.population_initializer = PopulationInitializer(self.graph, start_node)
         
         # Initialize fitness evaluator with segment cache
-        self.fitness_evaluator = GAFitnessEvaluator(objective, distance_km, self.segment_cache)
+        self.fitness_evaluator = GAFitnessEvaluator(objective, distance_km, self.segment_cache, enable_micro_terrain=True)
         
         # Reset tracking
         self.generation = 0
@@ -378,50 +364,8 @@ class GeneticRouteOptimizer:
         Returns:
             List of fitness scores
         """
-        if self.precision_components_enabled and self.enhanced_fitness_evaluator:
-            # Use precision-enhanced fitness evaluation
-            fitness_scores = []
-            
-            for chromosome in population:
-                try:
-                    # Convert chromosome to coordinates
-                    route_coords = self._chromosome_to_coordinates(chromosome)
-                    
-                    # Evaluate with precision enhancement
-                    fitness_result = self.enhanced_fitness_evaluator.evaluate_route_fitness(
-                        route_coords, objective, distance_km
-                    )
-                    
-                    # Apply precision fitness weight
-                    base_fitness = fitness_result.get('total_fitness', 0.0)
-                    precision_bonus = fitness_result.get('components', {}).get('precision_bonus', 0.0)
-                    
-                    # Weighted combination of base fitness and precision enhancement
-                    enhanced_fitness = (
-                        base_fitness * (1 - self.config.precision_fitness_weight) +
-                        precision_bonus * self.config.precision_fitness_weight
-                    )
-                    
-                    fitness_scores.append(enhanced_fitness)
-                    
-                    # Store precision data in chromosome for later analysis
-                    if hasattr(chromosome, 'precision_data'):
-                        chromosome.precision_data = {
-                            'micro_terrain_features': fitness_result.get('elevation_profile', {}).get('micro_terrain_features', {}),
-                            'precision_benefits': fitness_result.get('components', {}),
-                            'fitness_components': fitness_result.get('components', {})
-                        }
-                
-                except Exception as e:
-                    logger.warning(f"Precision fitness evaluation failed for chromosome: {e}")
-                    # Fallback to standard fitness evaluation
-                    fallback_fitness = self.fitness_evaluator.evaluate_chromosome(chromosome)
-                    fitness_scores.append(fallback_fitness)
-            
-            return fitness_scores
-        else:
-            # Use standard fitness evaluation
-            return self.fitness_evaluator.evaluate_population(population, self.graph)
+        # Use standard fitness evaluation with integrated micro-terrain analysis
+        return self.fitness_evaluator.evaluate_population(population, self.graph)
     
     def _chromosome_to_coordinates(self, chromosome: RouteChromosome) -> List[Tuple[float, float]]:
         """Convert chromosome route to coordinate list

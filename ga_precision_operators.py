@@ -15,7 +15,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 try:
-    from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator
+    # from ga_precision_fitness import PrecisionElevationAnalyzer, EnhancedGAFitnessEvaluator  # Removed - functionality integrated into ga_fitness
     PRECISION_FITNESS_AVAILABLE = True
 except ImportError:
     PRECISION_FITNESS_AVAILABLE = False

@@ -122,7 +122,7 @@ class TestGeneticOptimizer(unittest.TestCase):
         
         # Verify initialization
         mock_population.assert_called_once_with(self.test_graph, 1)
-        mock_fitness.assert_called_once_with("elevation", 5.0)
+        mock_fitness.assert_called_once_with("elevation", 5.0, unittest.mock.ANY, enable_micro_terrain=True)
         
         # Verify reset
         self.assertEqual(self.optimizer.generation, 0)
