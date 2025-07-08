@@ -244,8 +244,12 @@ class RouteChromosome:
         self.objective_score = None
         self._segment_usage = {}  # Reset segment usage tracking
     
-    def validate_connectivity(self) -> bool:
-        """Validate that all segments are properly connected and respect usage limits"""
+    def validate_connectivity(self, allow_bidirectional: bool = True) -> bool:
+        """Validate that all segments are properly connected and respect usage limits
+        
+        Args:
+            allow_bidirectional: Whether to allow segments to be used in both directions
+        """
         if not self.segments:
             self.is_valid = False
             return False
@@ -268,15 +272,19 @@ class RouteChromosome:
             self.is_circular = True
         
         # Validate segment usage limits
-        if not self._validate_segment_usage():
+        if not self._validate_segment_usage(allow_bidirectional):
             self.is_valid = False
             return False
         
         self.is_valid = True
         return True
     
-    def _validate_segment_usage(self) -> bool:
-        """Validate that no segment is used more than twice (once in each direction)"""
+    def _validate_segment_usage(self, allow_bidirectional: bool = True) -> bool:
+        """Validate segment usage limits based on configuration
+        
+        Args:
+            allow_bidirectional: Whether to allow segments to be used in both directions
+        """
         self._segment_usage = {}
         
         for segment in self.segments:
@@ -299,6 +307,12 @@ class RouteChromosome:
             # Check if limit exceeded (max 1 time per direction)
             if self._segment_usage[edge_key][direction] > 1:
                 return False
+            
+            # If bidirectional usage is not allowed, check if edge is used in both directions
+            if not allow_bidirectional:
+                if (self._segment_usage[edge_key]["forward"] > 0 and 
+                    self._segment_usage[edge_key]["backward"] > 0):
+                    return False
         
         return True
     

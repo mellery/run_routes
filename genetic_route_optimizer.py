@@ -46,6 +46,9 @@ class GAConfig:
     adaptive_sizing: bool = True
     verbose: bool = True
     
+    # Segment usage constraints
+    allow_bidirectional_segments: bool = True  # Allow using segments in both directions
+    
     # Enhanced 1m precision settings
     enable_precision_enhancement: bool = False  # Disabled by default for stability
     precision_fitness_weight: float = 0.3
@@ -93,7 +96,7 @@ class GeneticRouteOptimizer:
         
         # Initialize components
         self.population_initializer = None
-        self.operators = GAOperators(graph)
+        self.operators = GAOperators(graph, self.config.allow_bidirectional_segments)
         self.fitness_evaluator = None
         
         # Enhanced 1m precision components - disabled by default for testing
@@ -335,7 +338,11 @@ class GeneticRouteOptimizer:
         self.population_initializer = PopulationInitializer(self.graph, start_node)
         
         # Initialize fitness evaluator with segment cache
-        self.fitness_evaluator = GAFitnessEvaluator(objective, distance_km, self.segment_cache, enable_micro_terrain=True)
+        self.fitness_evaluator = GAFitnessEvaluator(
+            objective, distance_km, self.segment_cache, 
+            enable_micro_terrain=True, 
+            allow_bidirectional_segments=self.config.allow_bidirectional_segments
+        )
         
         # Reset tracking
         self.generation = 0

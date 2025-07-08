@@ -217,7 +217,7 @@ class RefactoredCLIRoutePlanner:
                 print("\n⏹️ Selection cancelled")
                 return None
     
-    def generate_route(self, start_node, target_distance, objective=None, algorithm="genetic", exclude_footways=True):
+    def generate_route(self, start_node, target_distance, objective=None, algorithm="genetic", exclude_footways=True, allow_bidirectional_segments=True):
         """Generate optimized route using route services
         
         Args:
@@ -226,6 +226,7 @@ class RefactoredCLIRoutePlanner:
             objective: Route objective
             algorithm: Algorithm to use ('genetic')
             exclude_footways: Whether to exclude footway/sidewalk segments (default True)
+            allow_bidirectional_segments: Whether to allow segments to be used in both directions (default True)
             
         Returns:
             Route result dictionary or None
@@ -246,7 +247,8 @@ class RefactoredCLIRoutePlanner:
             target_distance_km=target_distance,
             objective=objective,
             algorithm=algorithm,
-            exclude_footways=exclude_footways
+            exclude_footways=exclude_footways,
+            allow_bidirectional_segments=allow_bidirectional_segments
         )
         
         if result:
@@ -1002,6 +1004,10 @@ def interactive_mode():
                     footway_input = input("\nInclude footways/sidewalks? (can cause redundant back-and-forth routes) (y/n) [n]: ").strip().lower()
                     exclude_footways = footway_input not in ['y', 'yes']
                     
+                    # Ask about bidirectional segment usage
+                    bidirectional_input = input("\nAllow bidirectional segment usage? (using same road in both directions) (y/n) [y]: ").strip().lower()
+                    allow_bidirectional_segments = bidirectional_input not in ['n', 'no']
+                    
                     # Check if we need to expand network for larger routes
                     if target_distance > 8.0:  # For routes > 8km
                         required_radius = min(target_distance * 0.8, 25.0)  # 80% of distance, max 25km
@@ -1012,7 +1018,7 @@ def interactive_mode():
                             continue
                     
                     # Generate route
-                    result = planner.generate_route(start_node, target_distance, objective, algorithm, exclude_footways)
+                    result = planner.generate_route(start_node, target_distance, objective, algorithm, exclude_footways, allow_bidirectional_segments)
                     
                     if result:
                         planner.display_route_stats(result)
@@ -1115,6 +1121,12 @@ def main():
     )
     
     parser.add_argument(
+        '--no-bidirectional-segments',
+        action='store_true',
+        help='Disallow bidirectional segment usage (prevents using same road in both directions)'
+    )
+    
+    parser.add_argument(
         '--elevation-source',
         choices=['3dep_local', 'srtm', 'hybrid', 'auto'],
         default='auto',
@@ -1194,7 +1206,8 @@ def main():
         result = planner.generate_route(
             args.start_node, args.distance, 
             obj_map[args.objective], args.algorithm,
-            exclude_footways=not args.include_footways
+            exclude_footways=not args.include_footways,
+            allow_bidirectional_segments=not args.no_bidirectional_segments
         )
         
         if result:

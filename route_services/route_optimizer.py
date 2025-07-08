@@ -114,7 +114,8 @@ class RouteOptimizer:
     
     def optimize_route(self, start_node: int, target_distance_km: float,
                       objective: str = None, algorithm: str = "auto", 
-                      exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
+                      exclude_footways: bool = True, 
+                      allow_bidirectional_segments: bool = True) -> Optional[Dict[str, Any]]:
         """Generate optimized route
         
         Args:
@@ -123,6 +124,7 @@ class RouteOptimizer:
             objective: Route objective (from RouteObjective enum)
             algorithm: Algorithm to use ('nearest_neighbor', 'genetic', or 'auto')
             exclude_footways: Whether to exclude footway segments (default True)
+            allow_bidirectional_segments: Whether to allow segments to be used in both directions (default True)
             
         Returns:
             Route result dictionary or None if optimization fails
@@ -153,10 +155,11 @@ class RouteOptimizer:
         print(f"   Algorithm: {selected_algorithm}")
         print(f"   Solver: {self._solver_type}")
         print(f"   Exclude footways: {exclude_footways}")
+        print(f"   Allow bidirectional segments: {allow_bidirectional_segments}")
         
         try:
             # Use genetic algorithm optimization
-            return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways)
+            return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways, allow_bidirectional_segments)
                 
         except Exception as e:
             print(f"❌ Route generation failed: {e}")
@@ -242,13 +245,15 @@ class RouteOptimizer:
         # Always use genetic algorithm
         return "genetic"
     
-    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str, exclude_footways: bool = True) -> Optional[Dict[str, Any]]:
+    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str, exclude_footways: bool = True, allow_bidirectional_segments: bool = True) -> Optional[Dict[str, Any]]:
         """Optimize route using genetic algorithm
         
         Args:
             start_node: Starting node ID
             target_distance_km: Target route distance in kilometers
             objective: Route objective
+            exclude_footways: Whether to exclude footway segments
+            allow_bidirectional_segments: Whether to allow segments to be used in both directions
             
         Returns:
             Route result dictionary or None if optimization fails
@@ -261,12 +266,16 @@ class RouteOptimizer:
         # Filter graph if needed
         working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
         
+        # Create GA optimizer with appropriate configuration
+        from genetic_route_optimizer import GeneticRouteOptimizer, GAConfig
+        config = GAConfig(allow_bidirectional_segments=allow_bidirectional_segments)
+        
         # Create filtered GA optimizer if needed
         if exclude_footways and working_graph != self.graph:
-            from genetic_route_optimizer import GeneticRouteOptimizer
-            ga_optimizer = GeneticRouteOptimizer(working_graph)
+            ga_optimizer = GeneticRouteOptimizer(working_graph, config)
         else:
-            ga_optimizer = self._ga_optimizer
+            # Create new optimizer with updated config for this request
+            ga_optimizer = GeneticRouteOptimizer(self.graph, config)
         
         # Convert TSP objective to GA objective
         ga_objective = self._convert_tsp_to_ga_objective(objective)

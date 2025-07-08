@@ -16,14 +16,16 @@ from ga_chromosome import RouteChromosome, RouteSegment
 class GAOperators:
     """Collection of genetic algorithm operators for route optimization"""
     
-    def __init__(self, graph: nx.Graph):
+    def __init__(self, graph: nx.Graph, allow_bidirectional: bool = True):
         """Initialize genetic operators
         
         Args:
             graph: NetworkX graph with elevation and distance data
+            allow_bidirectional: Whether to allow segments to be used in both directions
         """
         self.graph = graph
         self.segment_cache = {}  # Cache for segment creation
+        self.allow_bidirectional = allow_bidirectional
         
     # =============================================================================
     # CROSSOVER OPERATORS
@@ -79,8 +81,8 @@ class GAOperators:
         offspring2.parent_ids = [id(parent1), id(parent2)]
         
         # Repair and validate offspring
-        offspring1 = self._repair_chromosome(offspring1)
-        offspring2 = self._repair_chromosome(offspring2)
+        offspring1 = self._repair_chromosome(offspring1, self.allow_bidirectional)
+        offspring2 = self._repair_chromosome(offspring2, self.allow_bidirectional)
         
         return offspring1, offspring2
     
@@ -142,8 +144,8 @@ class GAOperators:
         offspring2.parent_ids = [id(parent1), id(parent2)]
         
         # Repair and validate offspring
-        offspring1 = self._repair_chromosome(offspring1)
-        offspring2 = self._repair_chromosome(offspring2)
+        offspring1 = self._repair_chromosome(offspring1, self.allow_bidirectional)
+        offspring2 = self._repair_chromosome(offspring2, self.allow_bidirectional)
         
         return offspring1, offspring2
     
@@ -182,7 +184,7 @@ class GAOperators:
                     mutations_made += 1
         
         if mutations_made > 0:
-            mutated = self._repair_chromosome(mutated)
+            mutated = self._repair_chromosome(mutated, self.allow_bidirectional)
             mutated.creation_method = f"segment_replacement_mutation({mutations_made})"
         
         return mutated
@@ -220,7 +222,7 @@ class GAOperators:
             # Route too long, remove segments  
             mutated = self._remove_excess_segments(mutated, target_distance_km)
         
-        mutated = self._repair_chromosome(mutated)
+        mutated = self._repair_chromosome(mutated, self.allow_bidirectional)
         mutated.creation_method = f"route_extension_mutation({distance_error:+.2f}km)"
         
         return mutated
@@ -274,7 +276,7 @@ class GAOperators:
                 
                 if new_segment and new_segment.elevation_gain > worst_segment.elevation_gain:
                     mutated.segments[worst_segment_idx] = new_segment
-                    mutated = self._repair_chromosome(mutated)
+                    mutated = self._repair_chromosome(mutated, self.allow_bidirectional)
                     mutated.creation_method = "elevation_bias_mutation"
         
         return mutated
@@ -652,17 +654,22 @@ class GAOperators:
         
         return reduced
     
-    def _repair_chromosome(self, chromosome: RouteChromosome) -> RouteChromosome:
-        """Repair chromosome connectivity and validate segment usage limits"""
+    def _repair_chromosome(self, chromosome: RouteChromosome, allow_bidirectional: bool = True) -> RouteChromosome:
+        """Repair chromosome connectivity and validate segment usage limits
+        
+        Args:
+            chromosome: Chromosome to repair
+            allow_bidirectional: Whether to allow segments to be used in both directions
+        """
         if not chromosome.segments:
             return chromosome
         
         # Validate connectivity and repair if needed
-        chromosome.validate_connectivity()
+        chromosome.validate_connectivity(allow_bidirectional)
         
         # If segment usage validation failed, attempt repair
         if not chromosome.is_valid:
-            chromosome = self._repair_segment_usage(chromosome)
+            chromosome = self._repair_segment_usage(chromosome, allow_bidirectional)
         
         # Recalculate properties
         for segment in chromosome.segments:
@@ -689,8 +696,13 @@ class GAOperators:
         
         return base_fitness + diversity_bonus * 0.1
     
-    def _repair_segment_usage(self, chromosome: RouteChromosome) -> RouteChromosome:
-        """Repair chromosome to respect segment usage limits"""
+    def _repair_segment_usage(self, chromosome: RouteChromosome, allow_bidirectional: bool = True) -> RouteChromosome:
+        """Repair chromosome to respect segment usage limits
+        
+        Args:
+            chromosome: Chromosome to repair
+            allow_bidirectional: Whether to allow segments to be used in both directions
+        """
         if not chromosome.segments:
             return chromosome
         
@@ -712,8 +724,20 @@ class GAOperators:
             if edge_key not in segment_usage:
                 segment_usage[edge_key] = {"forward": 0, "backward": 0}
             
-            # Check if this segment would exceed usage limit
-            if segment_usage[edge_key][direction] < 1:
+            # Check if this segment would exceed usage limits
+            can_use_segment = True
+            
+            # Check per-direction limit
+            if segment_usage[edge_key][direction] >= 1:
+                can_use_segment = False
+            
+            # Check bidirectional constraint if applicable
+            if (not allow_bidirectional and can_use_segment):
+                other_direction = "backward" if direction == "forward" else "forward"
+                if segment_usage[edge_key][other_direction] > 0:
+                    can_use_segment = False
+            
+            if can_use_segment:
                 # Segment can be used
                 segment_usage[edge_key][direction] += 1
                 repaired_segments.append(segment)
