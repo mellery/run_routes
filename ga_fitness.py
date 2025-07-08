@@ -223,18 +223,18 @@ class GAFitnessEvaluator:
         if distance_km > self.target_distance_km * 1.15 or distance_km < self.target_distance_km * 0.85:
             return 0.01  # Nearly zero fitness for extreme deviations
         
-        # Penalty for distance deviation from target (tighter constraints)
+        # Penalty for distance deviation from target
         distance_error = abs(distance_km - self.target_distance_km)
-        distance_tolerance = self.target_distance_km * 0.05  # 5% tolerance (reduced from 10%)
+        distance_tolerance = self.target_distance_km * 0.10  # 10% tolerance
         
         if distance_error <= distance_tolerance:
-            # Within tolerance - high score
-            return 1.0 - (distance_error / distance_tolerance) * 0.2
+            # Within tolerance - high score with gentle slope
+            return 1.0 - (distance_error / distance_tolerance) * 0.1
         else:
-            # Outside tolerance - severe exponential penalty
+            # Outside tolerance - exponential penalty
             excess_ratio = (distance_error - distance_tolerance) / self.target_distance_km
-            penalty = min(0.95, excess_ratio * 4.0)  # Increased penalty multiplier
-            return max(0.0, 0.8 - penalty)
+            penalty = min(0.8, excess_ratio * 3.0)  
+            return max(0.0, 0.9 - penalty)
     
     def _calculate_elevation_score(self, elevation_gain_m: float, max_grade_percent: float) -> float:
         """Calculate elevation-based score component"""

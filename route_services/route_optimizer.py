@@ -597,7 +597,7 @@ class RouteOptimizer:
         """
         info = {
             'solver_type': self._solver_type,
-            'solver_class': self._optimizer_class.__name__,
+            'solver_class': self._optimizer_instance.__class__.__name__ if self._optimizer_instance else 'Unknown',
             'available_objectives': list(self.get_available_objectives().keys()),
             'available_algorithms': self.get_available_algorithms(),
             'graph_nodes': len(self.graph.nodes) if self.graph else 0,

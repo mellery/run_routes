@@ -37,6 +37,7 @@ class TestGeneticOptimizer(unittest.TestCase):
         self.test_config = GAConfig(
             population_size=10,
             max_generations=20,
+            elite_size=2,  # Reasonable elite size
             verbose=False
         )
         
@@ -121,8 +122,8 @@ class TestGeneticOptimizer(unittest.TestCase):
         self.optimizer._setup_optimization(1, 5.0, "elevation")
         
         # Verify initialization
-        mock_population.assert_called_once_with(self.test_graph, 1)
-        mock_fitness.assert_called_once_with("elevation", 5.0, unittest.mock.ANY, enable_micro_terrain=True)
+        mock_population.assert_called_once_with(self.test_graph, 1, True)
+        mock_fitness.assert_called_once_with("elevation", 5.0, unittest.mock.ANY, enable_micro_terrain=True, allow_bidirectional_segments=True)
         
         # Verify reset
         self.assertEqual(self.optimizer.generation, 0)
@@ -175,7 +176,8 @@ class TestGeneticOptimizer(unittest.TestCase):
         with patch.object(self.optimizer.operators, 'tournament_selection') as mock_selection, \
              patch.object(self.optimizer.operators, 'segment_exchange_crossover') as mock_crossover, \
              patch.object(self.optimizer.operators, 'segment_replacement_mutation') as mock_mutation1, \
-             patch.object(self.optimizer.operators, 'route_extension_mutation') as mock_mutation2:
+             patch.object(self.optimizer.operators, 'route_extension_mutation') as mock_mutation2, \
+             patch.object(self.optimizer, '_apply_population_filtering') as mock_filtering:
             
             # Setup mocks to return valid chromosomes
             mock_selection.return_value = population[0]  # Return first chromosome
@@ -183,10 +185,16 @@ class TestGeneticOptimizer(unittest.TestCase):
             mock_mutation1.return_value = population[0].copy()
             mock_mutation2.return_value = population[1].copy()
             
+            # Setup filtering mock to pass through without filtering
+            mock_filtering.side_effect = lambda pop, fit: (pop, fit)
+            
             # Setup fitness evaluator
             self.optimizer.fitness_evaluator = Mock()
             self.optimizer.fitness_evaluator.target_distance_km = 5.0
-            self.optimizer.fitness_evaluator.evaluate_population.return_value = fitness_scores[:pop_size]
+            # Mock should return appropriate number of scores based on population size
+            def mock_evaluate_population(population, graph):
+                return [0.5 + i * 0.01 for i in range(len(population))]
+            self.optimizer.fitness_evaluator.evaluate_population.side_effect = mock_evaluate_population
             
             # Test evolution
             new_population, new_fitness = self.optimizer._evolve_generation(population, fitness_scores)
