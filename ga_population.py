@@ -16,15 +16,17 @@ from ga_chromosome import RouteChromosome, RouteSegment
 class PopulationInitializer:
     """Creates initial populations using multiple strategies"""
     
-    def __init__(self, graph: nx.Graph, start_node: int):
+    def __init__(self, graph: nx.Graph, start_node: int, allow_bidirectional: bool = True):
         """Initialize population creator
         
         Args:
             graph: NetworkX graph with elevation data
             start_node: Starting node for all routes
+            allow_bidirectional: Whether to allow bidirectional segment usage
         """
         self.graph = graph
         self.start_node = start_node
+        self.allow_bidirectional = allow_bidirectional
         
         # Cache for performance
         self._neighbor_cache = {}
@@ -98,10 +100,10 @@ class PopulationInitializer:
                 chromosome.generation = 0
                 population.append(chromosome)
         
-        # Validate population
+        # Validate population with bidirectional constraint
         valid_population = []
         for chromosome in population:
-            if chromosome and chromosome.validate_connectivity():
+            if chromosome and chromosome.validate_connectivity(self.allow_bidirectional):
                 valid_population.append(chromosome)
         
         print(f"Population created: {len(valid_population)}/{size} valid chromosomes")
@@ -388,14 +390,48 @@ class PopulationInitializer:
         if not best_neighbor:
             best_neighbor = random.choice(neighbors)
         
-        # Create simple route: start -> neighbor -> start
-        segment1 = self._create_segment(self.start_node, best_neighbor)
-        segment2 = self._create_segment(best_neighbor, self.start_node)
-        
-        if segment1 and segment2 and segment1.is_valid and segment2.is_valid:
-            chromosome = RouteChromosome([segment1, segment2])
-            chromosome.validate_connectivity()
-            return chromosome
+        # Create route based on bidirectional constraint
+        if self.allow_bidirectional:
+            # Create simple route: start -> neighbor -> start
+            segment1 = self._create_segment(self.start_node, best_neighbor)
+            segment2 = self._create_segment(best_neighbor, self.start_node)
+            
+            if segment1 and segment2 and segment1.is_valid and segment2.is_valid:
+                chromosome = RouteChromosome([segment1, segment2])
+                chromosome.validate_connectivity(self.allow_bidirectional)
+                return chromosome
+        else:
+            # For unidirectional constraint, create a longer route that doesn't backtrack
+            # Find a path through multiple neighbors
+            current_node = self.start_node
+            segments = []
+            visited_nodes = {current_node}
+            
+            for _ in range(4):  # Try to create 4-segment route
+                available_neighbors = [n for n in self._get_reachable_neighbors(current_node) 
+                                     if n not in visited_nodes]
+                if not available_neighbors:
+                    break
+                
+                next_node = random.choice(available_neighbors)
+                segment = self._create_segment(current_node, next_node)
+                if segment and segment.is_valid:
+                    segments.append(segment)
+                    visited_nodes.add(next_node)
+                    current_node = next_node
+                else:
+                    break
+            
+            # Return to start if possible without violating constraint
+            if segments and current_node != self.start_node:
+                return_segment = self._create_segment(current_node, self.start_node)
+                if return_segment and return_segment.is_valid:
+                    segments.append(return_segment)
+            
+            if segments:
+                chromosome = RouteChromosome(segments)
+                chromosome.validate_connectivity(self.allow_bidirectional)
+                return chromosome
         
         return None
     
@@ -518,7 +554,17 @@ class PopulationInitializer:
         if edge_key not in segment_usage:
             return True
         
-        return segment_usage[edge_key].get(direction, 0) < 1
+        # Check if this direction has been used before
+        if segment_usage[edge_key].get(direction, 0) >= 1:
+            return False
+        
+        # If bidirectional usage is not allowed, check if the opposite direction has been used
+        if not self.allow_bidirectional:
+            other_direction = "backward" if direction == "forward" else "forward"
+            if segment_usage[edge_key].get(other_direction, 0) > 0:
+                return False
+        
+        return True
     
     def _update_segment_usage(self, start_node: int, end_node: int, segment_usage: dict):
         """Update segment usage tracking"""

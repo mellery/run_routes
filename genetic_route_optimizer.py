@@ -335,7 +335,7 @@ class GeneticRouteOptimizer:
     def _setup_optimization(self, start_node: int, distance_km: float, objective: str):
         """Setup optimization components"""
         # Initialize population initializer
-        self.population_initializer = PopulationInitializer(self.graph, start_node)
+        self.population_initializer = PopulationInitializer(self.graph, start_node, self.config.allow_bidirectional_segments)
         
         # Initialize fitness evaluator with segment cache
         self.fitness_evaluator = GAFitnessEvaluator(
