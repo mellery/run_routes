@@ -16,8 +16,8 @@ import networkx as nx
 
 # GA imports
 try:
-    from genetic_route_optimizer import GeneticRouteOptimizer, GAConfig
-    from ga_fitness import FitnessObjective
+    from genetic_algorithm import GeneticRouteOptimizer, FitnessObjective
+    from genetic_algorithm.optimizer import GAConfig
     GA_AVAILABLE = True
 except ImportError:
     GA_AVAILABLE = False
@@ -113,7 +113,7 @@ class RouteOptimizer:
         return self._solver_type
     
     def optimize_route(self, start_node: int, target_distance_km: float,
-                      objective: str = None, algorithm: str = "auto", 
+                      objective: str = None, algorithm: str = "genetic", 
                       exclude_footways: bool = True, 
                       allow_bidirectional_segments: bool = True) -> Optional[Dict[str, Any]]:
         """Generate optimized route
@@ -122,7 +122,7 @@ class RouteOptimizer:
             start_node: Starting node ID
             target_distance_km: Target route distance in kilometers
             objective: Route objective (from RouteObjective enum)
-            algorithm: Algorithm to use ('nearest_neighbor', 'genetic', or 'auto')
+            algorithm: Algorithm to use ('genetic')
             exclude_footways: Whether to exclude footway segments (default True)
             allow_bidirectional_segments: Whether to allow segments to be used in both directions (default True)
             
@@ -184,7 +184,7 @@ class RouteOptimizer:
         Returns:
             List of algorithm names
         """
-        algorithms = ["auto"]
+        algorithms = []
         if GA_AVAILABLE:
             algorithms.append("genetic")
         return algorithms
@@ -233,7 +233,7 @@ class RouteOptimizer:
         """Select optimal algorithm based on parameters
         
         Args:
-            algorithm: Requested algorithm ('auto', 'genetic')
+            algorithm: Requested algorithm ('genetic')
             objective: Route objective
             
         Returns:

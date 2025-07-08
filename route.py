@@ -10,41 +10,6 @@ from math import radians, cos, sin, asin, sqrt
 def get_street_data(place_name):
     return ox.graph_from_place(place_name, network_type='all')
 
-# Function to print node information
-def print_node_info(graph):
-    for node, data in graph.nodes(data=True):
-        print(f"Node {node}: {data}")
-
-# Function to print information for a specific node ID
-def print_specific_node_info(graph, node_id):
-    if node_id in graph.nodes:
-        data = graph.nodes[node_id]
-        print(f"Node {node_id}: {data}")
-        print(graph.degree(node_id))
-    else:
-        print(f"Node {node_id} not found in the graph.")
-
-# Function to print the length of each edge for a specific node ID
-def print_edge_lengths(graph, node_id):
-    if node_id in graph.nodes:
-        for neighbor in graph.neighbors(node_id):
-            edge_data = graph.get_edge_data(node_id, neighbor)
-            for key, data in edge_data.items():
-                print(f"Edge from {node_id} to {neighbor} has length {data['length']} meters.")
-    else:
-        print(f"Node {node_id} not found in the graph.")
-
-# Function to remove nodes with only one connected street
-def remove_single_street_nodes(graph):
-    nodes_to_remove = [node for node, data in graph.nodes(data=True) if data.get('street_count', 0) <= 1]
-    graph.remove_nodes_from(nodes_to_remove)
-    return graph
-
-# Function to remove nodes with only one neighbor
-def remove_single_neighbor_nodes(graph):
-    nodes_to_remove = [node for node, degree in dict(graph.degree()).items() if degree == 1]
-    graph.remove_nodes_from(nodes_to_remove)
-    return graph
 
 # Function to calculate haversine distance between two points
 def haversine_distance(lat1, lon1, lat2, lon2):
@@ -482,12 +447,14 @@ def main():
         # Add running-specific weights
         street_data = add_running_weights(street_data)
 
-    # Print information for a specific node ID
+    # Analyze specific node
     specific_node_id = 216507089  # Replace with the actual node ID you want to check
-    print_specific_node_info(street_data, specific_node_id)
-
-    # Print the length of each edge for a specific node ID
-    print_edge_lengths(street_data, specific_node_id)
+    if specific_node_id in street_data.nodes:
+        data = street_data.nodes[specific_node_id]
+        print(f"Node {specific_node_id}: {data}")
+        print(f"Node degree: {street_data.degree(specific_node_id)}")
+    else:
+        print(f"Node {specific_node_id} not found in the graph.")
 
     # Test distance-constrained subgraph
     print("\n=== Testing Distance-Constrained Subgraph ===")

@@ -4,6 +4,10 @@ Genetic Algorithm Chromosome Classes
 Implements segment-based route representation for GA optimization
 """
 
+import sys
+import os
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+
 from ga_common_imports import (
     math, time, List, Optional, Tuple, Dict, Any, nx, np,
     calculate_distance, validate_route_connectivity, calculate_route_statistics,

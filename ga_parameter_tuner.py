@@ -138,7 +138,6 @@ class GAParameterTuner:
             'performance_improvements': []
         }
         
-        print("🎛️ GA Parameter Tuner initialized with adaptive strategies")
     
     def _define_parameter_ranges(self) -> Dict[str, ParameterRange]:
         """Define valid ranges for GA parameters"""
@@ -259,9 +258,6 @@ class GAParameterTuner:
             self.current_parameters.update(parameter_changes)
             self._record_adaptation(population_stats.generation, parameter_changes, 
                                   adaptation_metrics, ', '.join(adaptation_reasons))
-            
-            print(f"🎛️ Parameters adapted at generation {population_stats.generation}: "
-                  f"{', '.join(f'{k}={v:.3f}' for k, v in parameter_changes.items())}")
         
         return self.current_parameters.copy()
     
@@ -626,25 +622,21 @@ class GAParameterTuner:
         for rule in self.adaptation_rules:
             rule.last_adjustment_generation = -1
         
-        print("🎛️ Parameter tuner state reset for new optimization run")
 
 
 def test_parameter_tuner():
     """Test function for parameter tuner"""
-    print("Testing GA Parameter Tuner...")
     
     # Create tuner
     tuner = GAParameterTuner()
     
     # Test default parameters
     default_params = tuner._get_default_parameters()
-    print(f"✅ Default parameters: {len(default_params)} parameters defined")
     
     # Test parameter ranges
     for name, param_range in tuner.parameter_ranges.items():
         test_value = (param_range.min_value + param_range.max_value) / 2
         clamped = param_range.clamp(test_value)
-        print(f"✅ Parameter {name}: range [{param_range.min_value}, {param_range.max_value}], test value {clamped}")
     
     # Test adaptation with mock population stats
     mock_stats = PopulationStats(
@@ -662,18 +654,14 @@ def test_parameter_tuner():
     
     # Test adaptation
     adapted_params = tuner.adapt_parameters(mock_stats)
-    print(f"✅ Parameter adaptation completed: {len(adapted_params)} parameters")
     
     # Test configuration adaptation
     base_config = {'population_size': 100, 'mutation_rate': 0.1, 'max_generations': 200}
     adapted_config = tuner.get_adapted_config(base_config, RouteObjective.MAXIMIZE_ELEVATION, 5.0)
-    print(f"✅ Configuration adaptation: {adapted_config}")
     
     # Test recommendations
     recommendations = tuner.get_tuning_recommendations()
-    print(f"✅ Tuning recommendations: {len(recommendations)} categories")
     
-    print("✅ All parameter tuner tests completed")
 
 
 if __name__ == "__main__":

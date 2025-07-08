@@ -11,6 +11,8 @@ import os
 import time
 from datetime import datetime
 
+from ga_base_visualizer import BaseGAVisualizer, VisualizationConfig
+
 try:
     import contextily as ctx
     import geopandas as gpd
@@ -28,7 +30,7 @@ except ImportError:
     PRECISION_COMPONENTS_AVAILABLE = False
 
 
-class PrecisionComparisonVisualizer:
+class PrecisionComparisonVisualizer(BaseGAVisualizer):
     """Visualizes the benefits of 1m precision vs 90m precision for GA route optimization"""
     
     def __init__(self, output_dir: str = "./ga_precision_visualizations"):
@@ -37,18 +39,9 @@ class PrecisionComparisonVisualizer:
         Args:
             output_dir: Directory to save visualization outputs
         """
-        self.output_dir = output_dir
-        os.makedirs(output_dir, exist_ok=True)
-        
-        # Visualization parameters
-        self.figure_size = (16, 12)
-        self.dpi = 150
-        self.color_schemes = {
-            'high_res': '#1f77b4',      # Blue for 1m data
-            'low_res': '#ff7f0e',       # Orange for 90m data
-            'micro_features': '#2ca02c', # Green for micro-features
-            'elevation_gain': '#d62728'  # Red for elevation highlights
-        }
+        # Initialize base class
+        config = VisualizationConfig(output_dir=output_dir)
+        super().__init__(config)
         
     def create_precision_comparison_visualization(self, route_coordinates: List[Tuple[float, float]], 
                                                 graph=None, title_suffix: str = "") -> str:
@@ -129,14 +122,10 @@ class PrecisionComparisonVisualizer:
             
             # Save visualization
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"ga_precision_comparison_{timestamp}.png"
-            filepath = os.path.join(self.output_dir, filename)
-            
-            plt.savefig(filepath, dpi=self.dpi, bbox_inches='tight', 
-                       facecolor='white', edgecolor='none')
+            filename = "ga_precision_comparison"
+            filepath = self.save_figure(plt.gcf(), filename)
             print(f"✅ Saved precision comparison visualization: {filepath}")
             
-            plt.close()
             return filepath
             
         except Exception as e:
@@ -254,14 +243,10 @@ class PrecisionComparisonVisualizer:
             plt.tight_layout()
             
             # Save visualization
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"ga_evolution_comparison_{timestamp}.png"
-            filepath = os.path.join(self.output_dir, filename)
-            
-            plt.savefig(filepath, dpi=self.dpi, bbox_inches='tight')
+            filename = "ga_evolution_comparison"
+            filepath = self.save_figure(plt.gcf(), filename)
             print(f"✅ Saved GA evolution comparison: {filepath}")
             
-            plt.close()
             return filepath
             
         except Exception as e:

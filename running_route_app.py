@@ -301,24 +301,20 @@ def main():
     # Algorithm selection
     algorithms = route_optimizer.get_available_algorithms()
     
-    # Find genetic algorithm index, fallback to auto
+    # Find genetic algorithm index
     default_algorithm_index = 0
     if "genetic" in algorithms:
         default_algorithm_index = algorithms.index("genetic")
-    elif "auto" in algorithms:
-        default_algorithm_index = algorithms.index("auto")
     
     algorithm = st.sidebar.selectbox(
         "Algorithm",
         options=algorithms,
         index=default_algorithm_index,  # Default to genetic if available
-        help="Auto: Automatic selection • Genetic: Advanced genetic algorithm optimization"
+help="Genetic: Advanced genetic algorithm optimization"
     )
     
     # Show algorithm info
-    if algorithm == "auto":
-        st.sidebar.info("🤖 Auto mode uses genetic algorithm optimization")
-    elif algorithm == "genetic":
+    if algorithm == "genetic":
         st.sidebar.info("🧬 Genetic Algorithm: Finds creative routes with optimized elevation profiles")
     
     # Footway filtering option

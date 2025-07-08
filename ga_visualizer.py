@@ -12,15 +12,14 @@ from typing import List, Optional, Dict, Any, Tuple
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
-import folium
 import networkx as nx
 from matplotlib.colors import LinearSegmentedColormap
-import random
 
 from ga_chromosome import RouteChromosome, RouteSegment
+from ga_base_visualizer import BaseGAVisualizer, VisualizationConfig, GAVisualizationUtils
 
 
-class GAVisualizer:
+class GAVisualizer(BaseGAVisualizer):
     """Visualizer for GA development with OpenStreetMap backgrounds"""
     
     def __init__(self, graph: nx.Graph, output_dir: str = "ga_visualizations"):
@@ -30,48 +29,24 @@ class GAVisualizer:
             graph: NetworkX graph with elevation data
             output_dir: Directory to save visualization images
         """
-        self.graph = graph
-        self.output_dir = output_dir
+        # Initialize base class
+        config = VisualizationConfig(output_dir=output_dir)
+        super().__init__(config)
         
-        # Create output directory
-        os.makedirs(output_dir, exist_ok=True)
+        self.graph = graph
         
         # Get graph bounds for visualization
-        self.bounds = self._calculate_graph_bounds()
-        
-        # Color schemes
-        self.elevation_colormap = LinearSegmentedColormap.from_list(
-            'elevation', ['blue', 'green', 'yellow', 'orange', 'red']
-        )
-        
-        # Route colors for population visualization
-        self.route_colors = [
-            '#FF6B6B', '#4ECDC4', '#45B7D1', '#96CEB4', '#FFEAA7',
-            '#DDA0DD', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E9'
-        ]
+        self.bounds = GAVisualizationUtils.calculate_graph_bounds(graph)
         
         print(f"GAVisualizer initialized. Output directory: {output_dir}")
-    
-    def _calculate_graph_bounds(self) -> Dict[str, float]:
-        """Calculate bounding box of the graph"""
-        if not self.graph.nodes:
-            return {'min_lat': 0, 'max_lat': 0, 'min_lon': 0, 'max_lon': 0}
         
-        lats = [data['y'] for _, data in self.graph.nodes(data=True)]
-        lons = [data['x'] for _, data in self.graph.nodes(data=True)]
-        
-        return {
-            'min_lat': min(lats),
-            'max_lat': max(lats),
-            'min_lon': min(lons),
-            'max_lon': max(lons),
-            'center_lat': (min(lats) + max(lats)) / 2,
-            'center_lon': (min(lons) + max(lons)) / 2
-        }
-    
-    def _get_timestamp(self) -> str:
-        """Get current timestamp for filenames"""
-        return datetime.now().strftime("%Y%m%d_%H%M%S")
+        # Add center coordinates to bounds
+        if self.bounds['max_lat'] != self.bounds['min_lat']:
+            self.bounds['center_lat'] = (self.bounds['min_lat'] + self.bounds['max_lat']) / 2
+            self.bounds['center_lon'] = (self.bounds['min_lon'] + self.bounds['max_lon']) / 2
+        else:
+            self.bounds['center_lat'] = self.bounds['min_lat']
+            self.bounds['center_lon'] = self.bounds['min_lon']
     
     def save_chromosome_map(self, chromosome: RouteChromosome, 
                            filename: Optional[str] = None,
@@ -93,10 +68,7 @@ class GAVisualizer:
             Path to saved image
         """
         if filename is None:
-            timestamp = self._get_timestamp()
-            filename = f"ga_dev_chromosome_{timestamp}.png"
-        
-        filepath = os.path.join(self.output_dir, filename)
+            filename = "ga_dev_chromosome"
         
         # Create figure
         fig, ax = plt.subplots(figsize=(12, 10))
@@ -136,10 +108,11 @@ class GAVisualizer:
         # Add grid
         ax.grid(True, alpha=0.3)
         
-        # Save
+        # Save using base class method
         plt.tight_layout()
-        plt.savefig(filepath, dpi=150, bbox_inches='tight')
-        plt.close()
+        if filename is None:
+            filename = "ga_dev_chromosome"
+        filepath = self.save_figure(plt.gcf(), filename)
         
         print(f"Saved chromosome visualization: {filepath}")
         return filepath
@@ -164,10 +137,7 @@ class GAVisualizer:
             Path to saved image
         """
         if filename is None:
-            timestamp = self._get_timestamp()
-            filename = f"ga_dev_population_gen{generation:03d}_{timestamp}.png"
-        
-        filepath = os.path.join(self.output_dir, filename)
+            filename = f"ga_dev_population_gen{generation:03d}"
         
         # Create figure with subplots
         fig = plt.figure(figsize=(16, 12))
@@ -249,10 +219,9 @@ class GAVisualizer:
         
         ax_main.grid(True, alpha=0.3)
         
-        # Save
+        # Save using base class method
         plt.tight_layout()
-        plt.savefig(filepath, dpi=150, bbox_inches='tight')
-        plt.close()
+        filepath = self.save_figure(plt.gcf(), filename)
         
         print(f"Saved population visualization: {filepath}")
         return filepath
@@ -273,10 +242,7 @@ class GAVisualizer:
             Path to saved image
         """
         if filename is None:
-            timestamp = self._get_timestamp()
-            filename = f"ga_dev_comparison_{timestamp}.png"
-        
-        filepath = os.path.join(self.output_dir, filename)
+            filename = "ga_dev_comparison"
         
         # Create figure
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(20, 10))
@@ -312,10 +278,11 @@ class GAVisualizer:
         # Overall title
         fig.suptitle(title, fontsize=18, fontweight='bold')
         
-        # Save
+        # Save using base class method
         plt.tight_layout()
-        plt.savefig(filepath, dpi=150, bbox_inches='tight')
-        plt.close()
+        if filename is None:
+            filename = "ga_dev_comparison"
+        filepath = self.save_figure(plt.gcf(), filename)
         
         print(f"Saved comparison visualization: {filepath}")
         return filepath

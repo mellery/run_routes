@@ -967,11 +967,6 @@ def interactive_mode():
                     option_num = 1
                     algo_map = {}
                     
-                    if "auto" in available_algorithms:
-                        print(f"{option_num}. auto (automatic selection based on objective)")
-                        algo_map[option_num] = "auto"
-                        algo_options.append("auto")
-                        option_num += 1
                     
                     
                     if "genetic" in available_algorithms:
@@ -980,10 +975,6 @@ def interactive_mode():
                         algo_options.append("genetic")
                         option_num += 1
                     
-                    # Add unconstrained option
-                    print(f"{option_num}. unconstrained (shortest-path distances, no road-adjacent constraints)")
-                    algo_map[option_num] = "unconstrained"
-                    algo_options.append("unconstrained")
                     
                     # Find genetic algorithm option number for default
                     genetic_option = None
@@ -996,9 +987,9 @@ def interactive_mode():
                     algo_input = input(f"Select algorithm (1-{len(algo_map)}) [{default_option}]: ").strip()
                     try:
                         algo_choice = int(algo_input) if algo_input else default_option
-                        algorithm = algo_map.get(algo_choice, "genetic" if "genetic" in available_algorithms else "auto" if "auto" in available_algorithms else "genetic")
+                        algorithm = algo_map.get(algo_choice, "genetic")
                     except ValueError:
-                        algorithm = "genetic" if "genetic" in available_algorithms else "auto" if "auto" in available_algorithms else "genetic"
+                        algorithm = "genetic"
                     
                     # Ask about footway inclusion
                     footway_input = input("\nInclude footways/sidewalks? (can cause redundant back-and-forth routes) (y/n) [n]: ").strip().lower()
@@ -1109,9 +1100,9 @@ def main():
     
     parser.add_argument(
         '--algorithm', '-a',
-        choices=['auto', 'genetic'],
-        default='auto',
-        help='Algorithm to use (auto = automatic selection, genetic = genetic algorithm)'
+choices=['genetic'],
+        default='genetic',
+        help='Algorithm to use (genetic = genetic algorithm)'
     )
     
     parser.add_argument(
