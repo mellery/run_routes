@@ -7,8 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 import math
 
-from ga_fitness import GAFitnessEvaluator, FitnessObjective
-from ga_chromosome import RouteChromosome, RouteSegment
+from genetic_algorithm import GAFitnessEvaluator, FitnessObjective, RouteChromosome, RouteSegment
 
 
 class TestGAFitness(unittest.TestCase):

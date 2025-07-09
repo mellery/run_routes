@@ -7,11 +7,12 @@ Tests RouteSegment and RouteChromosome functionality
 import unittest
 import sys
 import os
+import networkx as nx
 
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from ga_chromosome import RouteSegment, RouteChromosome
+from genetic_algorithm import RouteSegment, RouteChromosome
 from tests.ga_test_utils import GATestBase, GATestUtils
 
 

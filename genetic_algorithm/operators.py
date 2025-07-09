@@ -427,6 +427,54 @@ class GAOperators:
         # Diversity is inverse of average similarity
         avg_similarity = total_similarity / len(selected)
         return 1.0 - avg_similarity
+    
+    def survival_selection(self, population: List[RouteChromosome], 
+                          fitness_scores: List[float],
+                          survival_rate: float = 0.8,
+                          min_fitness_threshold: float = 0.1) -> Tuple[List[RouteChromosome], List[float]]:
+        """Select individuals for survival to next generation
+        
+        Args:
+            population: Current population
+            fitness_scores: Fitness scores for population
+            survival_rate: Fraction of population to keep (0.0 to 1.0)
+            min_fitness_threshold: Minimum fitness required for survival
+            
+        Returns:
+            Tuple of (surviving_population, surviving_fitness_scores)
+        """
+        if not population or not fitness_scores:
+            return [], []
+        
+        if len(population) != len(fitness_scores):
+            raise ValueError("Population and fitness scores must have same length")
+        
+        # Combine population with fitness scores
+        pop_fitness_pairs = list(zip(population, fitness_scores))
+        
+        # Filter by minimum fitness threshold
+        filtered_pairs = [(chromo, fitness) for chromo, fitness in pop_fitness_pairs 
+                         if fitness >= min_fitness_threshold]
+        
+        # If no individuals meet threshold, keep best one
+        if not filtered_pairs:
+            best_idx = fitness_scores.index(max(fitness_scores))
+            return [population[best_idx]], [fitness_scores[best_idx]]
+        
+        # Sort by fitness (descending)
+        filtered_pairs.sort(key=lambda x: x[1], reverse=True)
+        
+        # Calculate number of survivors
+        num_survivors = max(1, int(len(filtered_pairs) * survival_rate))
+        
+        # Select top survivors
+        survivors = filtered_pairs[:num_survivors]
+        
+        # Separate back into population and fitness lists
+        surviving_population = [chromo for chromo, fitness in survivors]
+        surviving_fitness = [fitness for chromo, fitness in survivors]
+        
+        return surviving_population, surviving_fitness
 
 
 class PrecisionAwareCrossover:

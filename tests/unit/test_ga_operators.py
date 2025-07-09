@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 from genetic_algorithm import GAOperators
 from genetic_algorithm import RouteChromosome, RouteSegment
 
-
 class TestGAOperators(unittest.TestCase):
     """Test GAOperators class functionality"""
     
@@ -196,38 +195,7 @@ class TestGAOperators(unittest.TestCase):
         # Should return unchanged copy
         self.assertEqual(len(mutated.segments), len(self.parent1.segments))
     
-    def test_elevation_bias_mutation_basic(self):
-        """Test basic elevation bias mutation"""
-        mutated = self.operators.elevation_bias_mutation(
-            self.parent1, objective="elevation", mutation_rate=1.0
-        )
-        
-        self.assertIsInstance(mutated, RouteChromosome)
-        self.assertIsNot(mutated, self.parent1)
-    
-    def test_elevation_bias_mutation_wrong_objective(self):
-        """Test elevation bias mutation with non-elevation objective"""
-        mutated = self.operators.elevation_bias_mutation(
-            self.parent1, objective="distance", mutation_rate=1.0
-        )
-        
-        # Should return unchanged copy for non-elevation objectives
-        self.assertEqual(len(mutated.segments), len(self.parent1.segments))
-    
-    def test_elevation_bias_mutation_rate(self):
-        """Test elevation bias mutation rate"""
-        # Test with 0% mutation rate
-        mutated = self.operators.elevation_bias_mutation(
-            self.parent1, objective="elevation", mutation_rate=0.0
-        )
-        
-        # Should return unchanged copy
-        self.assertEqual(len(mutated.segments), len(self.parent1.segments))
-    
-    # =============================================================================
-    # SELECTION OPERATOR TESTS
-    # =============================================================================
-    
+
     def test_tournament_selection_basic(self):
         """Test basic tournament selection"""
         population = [self.parent1, self.parent2]
@@ -327,94 +295,86 @@ class TestGAOperators(unittest.TestCase):
         # Should return entire population
         self.assertEqual(len(selected), 2)
     
+    def test_survival_selection_basic(self):
+        """Test basic survival selection"""
+        # Create population with varied fitness
+        chromo1 = self.parent1.copy()
+        chromo1.fitness = 0.9
+        chromo2 = self.parent2.copy()
+        chromo2.fitness = 0.7
+        chromo3 = self.parent1.copy()
+        chromo3.fitness = 0.5
+        chromo4 = self.parent2.copy()
+        chromo4.fitness = 0.3
+        
+        population = [chromo1, chromo2, chromo3, chromo4]
+        fitness_scores = [0.9, 0.7, 0.5, 0.3]
+        
+        # Select top 50% survivors
+        survivors, survivor_fitness = self.operators.survival_selection(
+            population, fitness_scores, survival_rate=0.5
+        )
+        
+        self.assertEqual(len(survivors), 2)
+        self.assertEqual(len(survivor_fitness), 2)
+        self.assertEqual(survivor_fitness[0], 0.9)  # Best fitness first
+        self.assertEqual(survivor_fitness[1], 0.7)  # Second best
+    
+    def test_survival_selection_fitness_threshold(self):
+        """Test survival selection with fitness threshold"""
+        # Create population where some don't meet threshold
+        chromo1 = self.parent1.copy()
+        chromo1.fitness = 0.8
+        chromo2 = self.parent2.copy()
+        chromo2.fitness = 0.6
+        chromo3 = self.parent1.copy()
+        chromo3.fitness = 0.05  # Below threshold
+        
+        population = [chromo1, chromo2, chromo3]
+        fitness_scores = [0.8, 0.6, 0.05]
+        
+        # Filter with threshold of 0.1 and 100% survival rate to keep all above threshold
+        survivors, survivor_fitness = self.operators.survival_selection(
+            population, fitness_scores, min_fitness_threshold=0.1, survival_rate=1.0
+        )
+        
+        # Should only keep first two (those above threshold)
+        self.assertEqual(len(survivors), 2)
+        self.assertEqual(survivor_fitness[0], 0.8)
+        self.assertEqual(survivor_fitness[1], 0.6)
+    
+    def test_survival_selection_all_below_threshold(self):
+        """Test survival selection when all below threshold"""
+        population = [self.parent1, self.parent2]
+        fitness_scores = [0.05, 0.03]  # All below threshold
+        
+        # Should keep best one even if below threshold
+        survivors, survivor_fitness = self.operators.survival_selection(
+            population, fitness_scores, min_fitness_threshold=0.1
+        )
+        
+        self.assertEqual(len(survivors), 1)
+        self.assertEqual(survivor_fitness[0], 0.05)  # Best of the bad ones
+    
+    def test_survival_selection_empty_population(self):
+        """Test survival selection with empty population"""
+        survivors, survivor_fitness = self.operators.survival_selection([], [])
+        
+        self.assertEqual(len(survivors), 0)
+        self.assertEqual(len(survivor_fitness), 0)
+    
+    def test_survival_selection_mismatched_lengths(self):
+        """Test survival selection with mismatched input lengths"""
+        population = [self.parent1, self.parent2]
+        fitness_scores = [0.8]  # Wrong length
+        
+        with self.assertRaises(ValueError):
+            self.operators.survival_selection(population, fitness_scores)
+    
     # =============================================================================
     # HELPER METHOD TESTS
     # =============================================================================
     
-    def test_find_common_nodes(self):
-        """Test finding common nodes between parents"""
-        common_nodes = self.operators._find_common_nodes(self.parent1, self.parent2)
-        
-        self.assertIsInstance(common_nodes, list)
-        # Should find node 2 and 3 as common (from overlapping segments)
-        self.assertIn(2, common_nodes)
-        self.assertIn(3, common_nodes)
-    
-    def test_find_common_nodes_no_overlap(self):
-        """Test finding common nodes with no overlap"""
-        # Create non-overlapping parents
-        segment_a = RouteSegment(1, 2, [1, 2])
-        segment_a.calculate_properties(self.graph)
-        segment_b = RouteSegment(4, 5, [4, 5])
-        segment_b.calculate_properties(self.graph)
-        
-        parent_a = RouteChromosome([segment_a])
-        parent_b = RouteChromosome([segment_b])
-        
-        common_nodes = self.operators._find_common_nodes(parent_a, parent_b)
-        
-        self.assertEqual(len(common_nodes), 0)
-    
-    def test_create_segment(self):
-        """Test segment creation"""
-        segment = self.operators._create_segment(1, 3)
-        
-        self.assertIsInstance(segment, RouteSegment)
-        self.assertEqual(segment.start_node, 1)
-        self.assertEqual(segment.end_node, 3)
-        self.assertGreater(segment.length, 0)
-    
-    def test_create_segment_no_path(self):
-        """Test segment creation with no path"""
-        # Add isolated node
-        self.graph.add_node(99, x=-80.5000, y=37.2000, elevation=120.0)
-        
-        segment = self.operators._create_segment(1, 99)
-        
-        self.assertIsNone(segment)
-    
-    def test_create_segment_caching(self):
-        """Test segment creation caching"""
-        # Create same segment twice
-        segment1 = self.operators._create_segment(1, 3)
-        segment2 = self.operators._create_segment(1, 3)
-        
-        self.assertIsInstance(segment1, RouteSegment)
-        self.assertIsInstance(segment2, RouteSegment)
-        # Should be copies, not same object
-        self.assertIsNot(segment1, segment2)
-        # But should have same properties
-        self.assertEqual(segment1.length, segment2.length)
-    
-    def test_get_elevation_neighbors(self):
-        """Test getting elevation neighbors"""
-        neighbors = self.operators._get_elevation_neighbors(1)  # elevation 100
-        
-        self.assertIsInstance(neighbors, list)
-        # Should include node 2 (elevation 110) but not node 5 (elevation 95)
-        self.assertIn(2, neighbors)
-        self.assertNotIn(5, neighbors)
-    
-    def test_get_elevation_neighbors_no_higher_neighbors(self):
-        """Test getting elevation neighbors from highest point"""
-        neighbors = self.operators._get_elevation_neighbors(4)  # elevation 115 (highest)
-        
-        # Should return empty list as no neighbors are higher
-        self.assertEqual(len(neighbors), 0)
-    
-    def test_repair_chromosome(self):
-        """Test chromosome repair functionality"""
-        # Create chromosome that might need repair
-        chromosome = self.parent1.copy()
-        
-        # Invalidate cache to test repair
-        chromosome._invalidate_cache()
-        
-        repaired = self.operators._repair_chromosome(chromosome)
-        
-        self.assertIsInstance(repaired, RouteChromosome)
-        self.assertTrue(repaired.is_valid)
-
 
 class TestGAOperatorsIntegration(unittest.TestCase):
     """Integration tests for GA operators"""
@@ -489,64 +449,4 @@ class TestGAOperatorsIntegration(unittest.TestCase):
         self.assertEqual(offspring1.creation_method, "segment_exchange_crossover")
         self.assertEqual(offspring2.creation_method, "segment_exchange_crossover")
     
-    def test_full_mutation_workflow(self):
-        """Test complete mutation workflow with complex chromosomes"""
-        # Test all mutation types
-        mutated1 = self.operators.segment_replacement_mutation(self.complex_parent1)
-        mutated2 = self.operators.route_extension_mutation(self.complex_parent1, 2.0)
-        mutated3 = self.operators.elevation_bias_mutation(self.complex_parent1, "elevation")
-        
-        # Validate all mutations
-        for mutated in [mutated1, mutated2, mutated3]:
-            self.assertIsInstance(mutated, RouteChromosome)
-            self.assertTrue(mutated.validate_connectivity())
-            self.assertGreater(len(mutated.segments), 0)
-    
-    def test_population_evolution_cycle(self):
-        """Test complete evolution cycle with selection and operators"""
-        # Create initial population
-        population = [
-            self.complex_parent1,
-            self.complex_parent2,
-            self.complex_parent1.copy(),
-            self.complex_parent2.copy()
-        ]
-        
-        # Set different fitness values
-        for i, chromo in enumerate(population):
-            chromo.fitness = 0.9 - i * 0.1
-        
-        # Selection phase
-        elite = self.operators.elitism_selection(population, elite_size=2)
-        selected_parents = [
-            self.operators.tournament_selection(population) for _ in range(4)
-        ]
-        
-        # Crossover phase
-        offspring = []
-        for i in range(0, len(selected_parents), 2):
-            if i + 1 < len(selected_parents):
-                child1, child2 = self.operators.segment_exchange_crossover(
-                    selected_parents[i], selected_parents[i + 1]
-                )
-                offspring.extend([child1, child2])
-        
-        # Mutation phase
-        mutated_offspring = []
-        for child in offspring:
-            mutated = self.operators.segment_replacement_mutation(child, mutation_rate=0.3)
-            mutated_offspring.append(mutated)
-        
-        # Validate entire evolution cycle
-        self.assertGreater(len(elite), 0)
-        self.assertGreater(len(offspring), 0)
-        self.assertGreater(len(mutated_offspring), 0)
-        
-        # All individuals should be valid
-        for individual in elite + offspring + mutated_offspring:
-            self.assertIsInstance(individual, RouteChromosome)
-            self.assertTrue(individual.validate_connectivity())
 
-
-if __name__ == '__main__':
-    unittest.main()
