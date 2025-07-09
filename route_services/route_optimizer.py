@@ -19,7 +19,8 @@ try:
     from genetic_algorithm import GeneticRouteOptimizer, FitnessObjective
     from genetic_algorithm.optimizer import GAConfig
     GA_AVAILABLE = True
-except ImportError:
+except ImportError as e:
+    print(f"GA import error: {e}")
     GA_AVAILABLE = False
 
 # Enhanced elevation imports
@@ -267,7 +268,6 @@ class RouteOptimizer:
         working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
         
         # Create GA optimizer with appropriate configuration
-        from genetic_route_optimizer import GeneticRouteOptimizer, GAConfig
         config = GAConfig(allow_bidirectional_segments=allow_bidirectional_segments)
         
         # Create filtered GA optimizer if needed
