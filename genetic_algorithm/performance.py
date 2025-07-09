@@ -12,7 +12,7 @@ from collections import OrderedDict
 import threading
 import networkx as nx
 
-from ga_chromosome import RouteSegment
+from .chromosome import RouteSegment
 
 
 @dataclass

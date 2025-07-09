@@ -42,11 +42,8 @@ except ImportError:
     ADVANCED_PLOTTING_AVAILABLE = False
 
 try:
-    from ga_parameter_tuner import GAParameterTuner
-    from ga_hyperparameter_optimizer import GAHyperparameterOptimizer  
-    from ga_algorithm_selector import GAAlgorithmSelector
-    from ga_config_manager import GAConfigManager
-    from ga_sensitivity_analyzer import GASensitivityAnalyzer
+    from .optimization import GAParameterTuner, GAHyperparameterOptimizer, GAAlgorithmSelector
+    from .analysis import GAConfigManager, GASensitivityAnalyzer
     TUNING_COMPONENTS_AVAILABLE = True
 except ImportError as e:
     print(f"Warning: GA tuning components not available: {e}")
@@ -59,7 +56,7 @@ except ImportError as e:
     class GASensitivityAnalyzer: pass
 
 try:
-    from ga_precision_operators import PrecisionAwareCrossover, PrecisionAwareMutation
+    from .operators import PrecisionAwareCrossover, PrecisionAwareMutation
     PRECISION_COMPONENTS_AVAILABLE = True
 except ImportError:
     PRECISION_COMPONENTS_AVAILABLE = False

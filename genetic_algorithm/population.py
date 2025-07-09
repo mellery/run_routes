@@ -10,7 +10,7 @@ from typing import List, Optional, Tuple, Set
 import networkx as nx
 import numpy as np
 
-from ga_chromosome import RouteChromosome, RouteSegment
+from .chromosome import RouteChromosome, RouteSegment
 
 
 class PopulationInitializer:

@@ -218,11 +218,13 @@ class GAOperators:
         return None
     
     def route_extension_mutation(self, chromosome: RouteChromosome, 
+                               target_distance_km: float,
                                mutation_rate: float = 0.1) -> RouteChromosome:
         """Extend route with new segments
         
         Args:
             chromosome: Chromosome to mutate
+            target_distance_km: Target distance for the route
             mutation_rate: Probability of extending the route
             
         Returns:

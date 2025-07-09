@@ -14,8 +14,8 @@ import sys
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from ga_operators import GAOperators
-from ga_chromosome import RouteChromosome, RouteSegment
+from genetic_algorithm import GAOperators
+from genetic_algorithm import RouteChromosome, RouteSegment
 
 
 class TestGAOperators(unittest.TestCase):

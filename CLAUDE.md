@@ -155,7 +155,6 @@ python cli_route_planner.py --interactive
 
 # Generate optimized route directly (genetic algorithm)
 python cli_route_planner.py --start-node 1529188403 --distance 5.0 --objective elevation --algorithm genetic
-python cli_route_planner.py --start-node 1529188403 --distance 5.0 --objective elevation --algorithm auto
 
 # === TESTING ===
 # Run comprehensive test suite (90 tests, all passing)
@@ -358,7 +357,7 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
   - Performance benchmarking suite with detailed metrics
   - Enhanced test runner with ga-integration and benchmark test categories
 - ✅ **Production Deployment Validation**: Ready for production use
-  - GA available in both CLI (--algorithm genetic/auto) and web interfaces
+  - GA available in both CLI (--algorithm genetic) and web interfaces
   - Robust genetic algorithm implementation
   - Real-world performance testing with memory usage and scalability analysis
   - Performance benchmarking framework with automated testing

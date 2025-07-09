@@ -283,7 +283,7 @@ def run_coverage_tests():
             "--cov=ga_population",
             "--cov=ga_operators",
             "--cov=ga_fitness",
-            "--cov=genetic_route_optimizer",
+            "--cov=genetic_algorithm",
             "--cov=ga_visualizer",
             "--cov=ga_parameter_tuning",
             "--cov=ga_performance",

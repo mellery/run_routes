@@ -111,8 +111,8 @@ class TestGeneticOptimizer(unittest.TestCase):
         self.assertEqual(results.total_time, 30.5)
         self.assertEqual(results.convergence_reason, "max_generations")
     
-    @patch('genetic_route_optimizer.PopulationInitializer')
-    @patch('genetic_route_optimizer.GAFitnessEvaluator')
+    @patch('genetic_algorithm.optimizer.PopulationInitializer')
+    @patch('genetic_algorithm.optimizer.GAFitnessEvaluator')
     def test_setup_optimization(self, mock_fitness, mock_population):
         """Test optimization setup"""
         # Setup mocks
@@ -238,8 +238,8 @@ class TestGeneticOptimizer(unittest.TestCase):
         convergence = self.optimizer._check_convergence([0.8] * 10)
         self.assertTrue(convergence)
     
-    @patch('genetic_route_optimizer.PopulationInitializer')
-    @patch('genetic_route_optimizer.GAFitnessEvaluator')
+    @patch('genetic_algorithm.optimizer.PopulationInitializer')
+    @patch('genetic_algorithm.optimizer.GAFitnessEvaluator')
     def test_optimize_route_basic(self, mock_fitness_class, mock_population_class):
         """Test basic route optimization"""
         # Setup mocks
@@ -359,7 +359,7 @@ class TestGeneticOptimizer(unittest.TestCase):
         self.optimizer.set_progress_callback(progress_callback)
         self.assertEqual(self.optimizer.progress_callback, progress_callback)
     
-    @patch('genetic_route_optimizer.datetime')
+    @patch('genetic_algorithm.optimizer.datetime')
     def test_visualization_generation(self, mock_datetime):
         """Test visualization generation"""
         # Setup mock datetime
@@ -392,7 +392,7 @@ class TestGeneticOptimizer(unittest.TestCase):
         optimizer = GeneticRouteOptimizer(empty_graph, self.test_config)
         
         # This should handle the empty graph gracefully
-        with patch('genetic_route_optimizer.PopulationInitializer') as mock_pop:
+        with patch('genetic_algorithm.optimizer.PopulationInitializer') as mock_pop:
             mock_pop.return_value.create_population.return_value = []
             
             try:

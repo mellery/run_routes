@@ -17,16 +17,16 @@ import networkx as nx
 # Configure logging
 logger = logging.getLogger(__name__)
 
-from ga_chromosome import RouteChromosome
-from ga_population import PopulationInitializer
-from ga_operators import GAOperators
-from ga_fitness import GAFitnessEvaluator, FitnessObjective
-from ga_segment_cache import GASegmentCache
+from .chromosome import RouteChromosome
+from .population import PopulationInitializer
+from .operators import GAOperators
+from .fitness import GAFitnessEvaluator, FitnessObjective
+from .performance import GASegmentCache
 
 # Enhanced 1m precision components (removed ga_precision_fitness - now integrated into ga_fitness)
 try:
-    from ga_precision_operators import PrecisionAwareCrossover, PrecisionAwareMutation
-    from ga_precision_visualizer import PrecisionComparisonVisualizer
+    from .operators import PrecisionAwareCrossover, PrecisionAwareMutation
+    from .visualization import PrecisionComparisonVisualizer
     PRECISION_ENHANCEMENT_AVAILABLE = True
 except ImportError:
     PRECISION_ENHANCEMENT_AVAILABLE = False

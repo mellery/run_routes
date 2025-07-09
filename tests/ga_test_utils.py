@@ -39,7 +39,7 @@ class GATestBase(unittest.TestCase):
         # Create GA components
         self.operators = GAOperators(self.mock_graph)
         self.fitness_evaluator = GAFitnessEvaluator()
-        self.population_initializer = PopulationInitializer(self.mock_graph)
+        self.population_initializer = PopulationInitializer(self.mock_graph, start_node=1)
     
     def create_mock_graph(self) -> nx.Graph:
         """Create standardized mock graph for testing

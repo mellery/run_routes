@@ -13,8 +13,8 @@ import os
 # Add project root to path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-from ga_population import PopulationInitializer
-from ga_chromosome import RouteChromosome, RouteSegment
+from genetic_algorithm import PopulationInitializer
+from genetic_algorithm import RouteChromosome, RouteSegment
 
 
 class TestPopulationInitializer(unittest.TestCase):
