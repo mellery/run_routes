@@ -5,8 +5,6 @@ Tests RouteSegment and RouteChromosome functionality
 """
 
 import unittest
-from unittest.mock import Mock, patch, MagicMock
-import networkx as nx
 import sys
 import os
 
@@ -14,20 +12,11 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
 from ga_chromosome import RouteSegment, RouteChromosome
+from tests.ga_test_utils import GATestBase, GATestUtils
 
 
-class TestRouteSegment(unittest.TestCase):
+class TestRouteSegment(GATestBase):
     """Test RouteSegment class"""
-    
-    def setUp(self):
-        """Set up test fixtures"""
-        # Create mock graph
-        self.mock_graph = nx.Graph()
-        self.mock_graph.add_node(1, x=-80.4094, y=37.1299, elevation=100.0)
-        self.mock_graph.add_node(2, x=-80.4090, y=37.1300, elevation=110.0)
-        self.mock_graph.add_node(3, x=-80.4086, y=37.1301, elevation=105.0)
-        self.mock_graph.add_edge(1, 2, length=100.0)
-        self.mock_graph.add_edge(2, 3, length=150.0)
     
     def test_segment_initialization(self):
         """Test segment initialization"""
@@ -44,6 +33,9 @@ class TestRouteSegment(unittest.TestCase):
         """Test segment property calculation"""
         segment = RouteSegment(1, 2, [1, 2])
         segment.calculate_properties(self.mock_graph)
+        
+        # Use test utilities for validation
+        GATestUtils.assert_segment_valid(self, segment)
         
         self.assertEqual(segment.length, 100.0)
         self.assertEqual(segment.elevation_gain, 10.0)  # 110 - 100

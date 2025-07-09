@@ -8,8 +8,9 @@ from unittest.mock import Mock, patch, MagicMock
 import networkx as nx
 import time
 
-from genetic_route_optimizer import GeneticRouteOptimizer, GAConfig, GAResults
-from ga_chromosome import RouteChromosome, RouteSegment
+from genetic_algorithm import GeneticRouteOptimizer
+from genetic_algorithm.optimizer import GAConfig, GAResults
+from genetic_algorithm import RouteChromosome, RouteSegment
 
 
 class TestGeneticOptimizer(unittest.TestCase):
