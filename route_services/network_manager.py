@@ -15,7 +15,7 @@ class NetworkManager:
     DEFAULT_CENTER_POINT = (37.1299, -80.4094)  # Christiansburg, VA
     DEFAULT_RADIUS_KM = 5.0  # Increased to cover all of Christiansburg
     DEFAULT_NETWORK_TYPE = 'all'
-    DEFAULT_START_NODE = 1529188403  # Downtown Christiansburg intersection
+    DEFAULT_START_COORDINATES = (37.13095, -80.40749)  # Dynamic node lookup based on these coordinates
     
     def __init__(self, center_point: Optional[Tuple[float, float]] = None, verbose: bool = True):
         """Initialize network manager
@@ -211,16 +211,10 @@ class NetworkManager:
             else:
                 raise ValueError(f"User-specified start node {user_start_node} not found in graph")
         
-        # Use default start node if it exists in graph
-        if self.DEFAULT_START_NODE in graph.nodes:
-            print(f"🎯 Using default start node: {self.DEFAULT_START_NODE}")
-            return self.DEFAULT_START_NODE
+        # Find node closest to default start coordinates
+        print(f"🔍 Finding node closest to default start coordinates {self.DEFAULT_START_COORDINATES}...")
         
-        # Fallback: find node closest to center point
-        print(f"⚠️ Default start node {self.DEFAULT_START_NODE} not found in graph")
-        print(f"🔍 Finding node closest to center point as fallback...")
-        
-        center_lat, center_lon = self.center_point
+        center_lat, center_lon = self.DEFAULT_START_COORDINATES
         closest_node = None
         min_distance = float('inf')
         
@@ -242,7 +236,7 @@ class NetworkManager:
         if closest_node is None:
             raise ValueError("No valid start node found in graph")
         
-        print(f"📍 Using fallback start node: {closest_node} ({min_distance:.0f}m from center)")
+        print(f"📍 Using dynamically found start node: {closest_node} ({min_distance:.0f}m from target)")
         return closest_node
     
     def clear_cache(self):

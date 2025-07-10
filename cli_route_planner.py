@@ -44,7 +44,7 @@ class RefactoredCLIRoutePlanner:
             elevation_config_path: Optional path to elevation configuration file
         """
         self.services = None
-        self.selected_start_node = 1529188403  # Default starting point
+        self.selected_start_node = None  # Will be dynamically determined from coordinates (37.13095, -80.40749)
         self.elevation_config_path = elevation_config_path
         self.elevation_manager = None
         self.preferred_elevation_source = None
@@ -102,10 +102,7 @@ class RefactoredCLIRoutePlanner:
             stats = network_manager.get_network_stats(graph)
             print(f"✅ Loaded {stats['nodes']} intersections and {stats['edges']} road segments")
             
-            # Validate default starting node
-            if not network_manager.validate_node_exists(graph, self.selected_start_node):
-                print(f"⚠️ Default starting node {self.selected_start_node} not found, will need to select one")
-                self.selected_start_node = None
+            # Note: Default starting node is now determined dynamically by NetworkManager
             
             return True
             
@@ -880,19 +877,28 @@ def interactive_mode():
     
     while True:
         # Show current starting point if selected
+        # Show current starting point (either user-selected or dynamic default)
+        network_manager = planner.services['network_manager']
+        graph = planner.services['graph']
+        
         if planner.selected_start_node:
-            network_manager = planner.services['network_manager']
-            graph = planner.services['graph']
-            
+            # User has manually selected a starting point
             if network_manager.validate_node_exists(graph, planner.selected_start_node):
                 node_info = network_manager.get_node_info(graph, planner.selected_start_node)
-                print(f"\n📍 Current starting point: Node {node_info['node_id']}")
+                print(f"\n📍 Current starting point: Node {node_info['node_id']} (user-selected)")
                 print(f"   Location: {node_info['latitude']:.6f}, {node_info['longitude']:.6f}")
                 print(f"   Elevation: {node_info['elevation']:.0f}m")
+        else:
+            # Show what the dynamic default would be
+            default_node = network_manager.get_start_node(graph)
+            node_info = network_manager.get_node_info(graph, default_node)
+            print(f"\n📍 Default starting point: Node {default_node} (dynamic)")
+            print(f"   Location: {node_info['latitude']:.6f}, {node_info['longitude']:.6f}")
+            print(f"   Elevation: {node_info['elevation']:.0f}m")
         
         print(f"\n📋 Main Menu:")
         print("1. Select starting point")
-        print("2. Generate route" + (" (with selected point)" if planner.selected_start_node else " (manual entry)"))
+        print("2. Generate route" + (" (with selected point)" if planner.selected_start_node else " (with dynamic default)"))
         print("3. Show solver information")
         print("4. Quit")
         
@@ -905,29 +911,39 @@ def interactive_mode():
             elif choice == '2':
                 # Route generation
                 try:
-                    # Use pre-selected starting point or manual entry
+                    # Use pre-selected starting point or get dynamic default
                     if planner.selected_start_node:
                         start_node = planner.selected_start_node
                         print(f"✅ Using selected starting point: Node {start_node}")
                     else:
-                        available_nodes = planner.list_starting_points(10)
-                        start_input = input("\nEnter starting node (option number or node ID): ").strip()
-                        
-                        try:
-                            input_num = int(start_input)
-                            if 1 <= input_num <= len(available_nodes):
-                                start_node = available_nodes[input_num - 1]
-                            else:
-                                start_node = input_num
-                        except ValueError:
-                            print("❌ Invalid input")
-                            continue
-                        
-                        # Validate node
+                        # Use NetworkManager's dynamic lookup for default start node
                         network_manager = planner.services['network_manager']
-                        if not network_manager.validate_node_exists(planner.services['graph'], start_node):
-                            print(f"❌ Invalid node: {start_node}")
-                            continue
+                        graph = planner.services['graph']
+                        dynamic_start_node = network_manager.get_start_node(graph)
+                        
+                        use_default = input(f"\nUse default starting point (Node {dynamic_start_node})? (y/n): ").strip().lower()
+                        if use_default == 'y' or use_default == '':
+                            start_node = dynamic_start_node
+                            print(f"✅ Using dynamic default starting point: Node {start_node}")
+                        else:
+                            available_nodes = planner.list_starting_points(10)
+                            start_input = input("\nEnter starting node (option number or node ID): ").strip()
+                            
+                            try:
+                                input_num = int(start_input)
+                                if 1 <= input_num <= len(available_nodes):
+                                    start_node = available_nodes[input_num - 1]
+                                else:
+                                    start_node = input_num
+                            except ValueError:
+                                print("❌ Invalid input")
+                                continue
+                            
+                            # Validate node
+                            network_manager = planner.services['network_manager']
+                            if not network_manager.validate_node_exists(planner.services['graph'], start_node):
+                                print(f"❌ Invalid node: {start_node}")
+                                continue
                     
                     # Get target distance
                     distance_input = input("Enter target distance (km) [5.0]: ").strip()
@@ -1194,8 +1210,17 @@ choices=['genetic'],
             'difficulty': route_optimizer.RouteObjective.MINIMIZE_DIFFICULTY
         }
         
+        # Use NetworkManager to get start node (handles dynamic lookup)
+        if args.start_node is not None:
+            start_node = args.start_node
+        else:
+            # Use NetworkManager's dynamic lookup for default start node
+            network_manager = planner.services['network_manager']
+            graph = planner.services['graph']
+            start_node = network_manager.get_start_node(graph)
+        
         result = planner.generate_route(
-            args.start_node, args.distance, 
+            start_node, args.distance, 
             obj_map[args.objective], args.algorithm,
             exclude_footways=not args.include_footways,
             allow_bidirectional_segments=not args.no_bidirectional_segments

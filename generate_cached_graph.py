@@ -2,6 +2,7 @@
 """
 Generate Cached Graph with Elevation Data
 Pre-processes street network with elevation data and saves to cache file
+Enhanced with OSMnx + 3DEP integration for improved accuracy and performance
 """
 
 import os
@@ -10,17 +11,20 @@ import time
 import argparse
 import osmnx as ox
 from route import add_elevation_to_graph, add_enhanced_elevation_to_graph, add_elevation_to_edges, add_running_weights
+from osmnx_config import configure_osmnx, get_config
+from osmnx_3dep_integration import add_elevation_hybrid_osmnx
 
-def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None, use_enhanced_elevation=True):
+def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None, use_enhanced_elevation=True, use_osmnx_elevation=True):
     """
     Generate and cache a graph with elevation data
     
     Args:
         center_point: (lat, lon) tuple for network center
         radius_m: Network radius in meters
-        network_type: OSMnx network type ('all', 'drive', 'walk', 'bike')
+        network_type: OSMnx network type ('all', 'drive', 'walk', 'bike', 'running')
         cache_file: Optional custom cache filename
-        use_enhanced_elevation: Whether to use 3DEP elevation data when available
+        use_enhanced_elevation: Whether to use 3DEP elevation data when available (legacy)
+        use_osmnx_elevation: Whether to use OSMnx + 3DEP integration (recommended)
     
     Returns:
         Processed graph with elevation data
@@ -36,15 +40,25 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
     start_time = time.time()
     
     try:
+        # Configure OSMnx for optimal performance
+        configure_osmnx(timeout=300, memory_gb=2)
+        config = get_config()
+        
         # Step 1: Download street network
         print("\n1️⃣ Downloading street network from OpenStreetMap...")
         step_start = time.time()
         
+        # Get network configuration
+        network_config = config.get_network_config(network_type)
+        
         graph = ox.graph_from_point(
             center_point, 
-            dist=radius_m, 
-            network_type=network_type
+            dist=radius_m,
+            **network_config
         )
+        
+        # Optimize graph with proper projected consolidation
+        graph = config.optimize_graph(graph, simplify=True, consolidate_intersections=True, preserve_nodes=False, tolerance=10.0)
         
         step_time = time.time() - step_start
         print(f"   ✅ Downloaded {len(graph.nodes)} nodes, {len(graph.edges)} edges ({step_time:.1f}s)")
@@ -53,24 +67,33 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         print("\n2️⃣ Adding elevation data to graph nodes...")
         step_start = time.time()
         
-        if use_enhanced_elevation:
+        if use_osmnx_elevation:
+            # New OSMnx + 3DEP integration method (recommended)
+            print("   Using OSMnx + 3DEP integration for enhanced accuracy...")
+            graph = add_elevation_hybrid_osmnx(graph, fallback_raster='srtm_20_05.tif')
+            
+        elif use_enhanced_elevation:
+            # Legacy enhanced elevation method
+            print("   Using legacy enhanced elevation method...")
             graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif')
+            
+            # Add edge grades manually (OSMnx method includes this)
+            print("\n3️⃣ Calculating elevation gain/loss for edges...")
+            graph = add_elevation_to_edges(graph)
+            
         else:
+            # Basic SRTM-only method
+            print("   Using basic SRTM elevation method...")
             graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
+            
+            # Add edge grades manually
+            print("\n3️⃣ Calculating elevation gain/loss for edges...")
+            graph = add_elevation_to_edges(graph)
         
         step_time = time.time() - step_start
-        print(f"   ✅ Added elevation data to all nodes ({step_time:.1f}s)")
+        print(f"   ✅ Added elevation data to all nodes and edges ({step_time:.1f}s)")
         
-        # Step 3: Add elevation data to edges
-        print("\n3️⃣ Calculating elevation gain/loss for edges...")
-        step_start = time.time()
-        
-        graph = add_elevation_to_edges(graph)
-        
-        step_time = time.time() - step_start
-        print(f"   ✅ Added elevation data to all edges ({step_time:.1f}s)")
-        
-        # Step 4: Add running-specific weights
+        # Step 3: Add running-specific weights
         print("\n4️⃣ Adding running-specific weights...")
         step_start = time.time()
         
@@ -232,9 +255,9 @@ def main():
     
     parser.add_argument(
         '--network-type', '-t',
-        choices=['all', 'drive', 'walk', 'bike'],
+        choices=['all', 'drive', 'walk', 'bike', 'running'],
         default='all',
-        help='Network type (default: all)'
+        help='Network type (default: all, "running" uses custom filter)'
     )
     
     parser.add_argument(
@@ -253,7 +276,7 @@ def main():
         '--enhanced-elevation', '-e',
         action='store_true',
         default=True,
-        help='Use enhanced 3DEP elevation data when available (default: True)'
+        help='Use enhanced 3DEP elevation data when available (legacy method)'
     )
     
     parser.add_argument(
@@ -262,10 +285,31 @@ def main():
         help='Disable enhanced elevation, use only SRTM data'
     )
     
+    parser.add_argument(
+        '--osmnx-elevation',
+        action='store_true',
+        default=True,
+        help='Use OSMnx + 3DEP integration for best accuracy (default: True)'
+    )
+    
+    parser.add_argument(
+        '--no-osmnx-elevation',
+        action='store_true',
+        help='Disable OSMnx elevation integration, use legacy methods'
+    )
+    
     args = parser.parse_args()
     
-    # Determine elevation mode
+    # Determine elevation modes
     use_enhanced_elevation = args.enhanced_elevation and not args.no_enhanced_elevation
+    use_osmnx_elevation = args.osmnx_elevation and not args.no_osmnx_elevation
+    
+    # Print configuration
+    print("🔧 Configuration:")
+    print(f"   Network type: {args.network_type}")
+    print(f"   Radius: {args.radius}m")
+    print(f"   OSMnx elevation: {use_osmnx_elevation}")
+    print(f"   Enhanced elevation (legacy): {use_enhanced_elevation}")
     
     # Christiansburg, VA coordinates
     center_point = (37.1299, -80.4094)
@@ -288,7 +332,14 @@ def main():
     
     # Generate new cache
     try:
-        generate_cached_graph(center_point, args.radius, args.network_type, cache_file, use_enhanced_elevation)
+        generate_cached_graph(
+            center_point, 
+            args.radius, 
+            args.network_type, 
+            cache_file, 
+            use_enhanced_elevation,
+            use_osmnx_elevation
+        )
         print(f"\n🎯 Cache generation complete: {cache_file}")
         
     except Exception as e:
