@@ -4,8 +4,12 @@ Elevation Profiler
 Generates elevation profile data from routes
 """
 
-from typing import List, Dict, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 import networkx as nx
+import geopandas as gpd
+import pandas as pd
+from shapely.geometry import Point, LineString
+import numpy as np
 
 
 class ElevationProfiler:
@@ -19,6 +23,7 @@ class ElevationProfiler:
         """
         self.graph = graph
         self._distance_cache = {}  # Cache for network distances
+        self._route_gdf_cache = {}  # Cache for route GeoDataFrames
     
     def generate_profile_data(self, route_result: Dict[str, Any], **kwargs) -> Dict[str, Any]:
         """Generate elevation profile data for a route
@@ -432,3 +437,514 @@ class ElevationProfiler:
                     })
         
         return detailed_path
+    
+    def get_route_geodataframe(self, route: List[int]) -> gpd.GeoDataFrame:
+        """Convert route to GeoDataFrame with elevation and spatial data
+        
+        Args:
+            route: List of node IDs
+            
+        Returns:
+            GeoDataFrame with route elevation profile data
+        """
+        if not route:
+            return gpd.GeoDataFrame()
+        
+        # Check cache first
+        route_key = tuple(route)
+        if route_key in self._route_gdf_cache:
+            return self._route_gdf_cache[route_key]
+        
+        # Create route data
+        route_data = []
+        cumulative_distance = 0
+        
+        for i, node_id in enumerate(route):
+            if node_id in self.graph.nodes:
+                node_data = self.graph.nodes[node_id]
+                
+                # Calculate segment distance
+                segment_distance = 0
+                if i > 0:
+                    prev_node = route[i-1]
+                    segment_distance = self._get_network_distance(prev_node, node_id)
+                    cumulative_distance += segment_distance
+                
+                route_data.append({
+                    'node_id': node_id,
+                    'route_index': i,
+                    'elevation': node_data.get('elevation', 0),
+                    'segment_distance_m': segment_distance,
+                    'cumulative_distance_m': cumulative_distance,
+                    'geometry': Point(node_data['x'], node_data['y'])
+                })
+        
+        # Create GeoDataFrame
+        route_gdf = gpd.GeoDataFrame(route_data, crs='EPSG:4326')
+        
+        if not route_gdf.empty:
+            # Add elevation analysis columns
+            route_gdf = self._add_elevation_analysis_columns(route_gdf)
+        
+        # Cache the result
+        self._route_gdf_cache[route_key] = route_gdf
+        
+        return route_gdf
+    
+    def _add_elevation_analysis_columns(self, route_gdf: gpd.GeoDataFrame) -> gpd.GeoDataFrame:
+        """Add elevation analysis columns to route GeoDataFrame
+        
+        Args:
+            route_gdf: GeoDataFrame with route data
+            
+        Returns:
+            GeoDataFrame with additional elevation analysis columns
+        """
+        if route_gdf.empty:
+            return route_gdf
+        
+        route_gdf = route_gdf.copy()
+        
+        # Calculate elevation changes
+        route_gdf['elevation_change_m'] = route_gdf['elevation'].diff().fillna(0)
+        
+        # Calculate grades (percentage)
+        route_gdf['grade_percent'] = np.where(
+            route_gdf['segment_distance_m'] > 0,
+            (route_gdf['elevation_change_m'] / route_gdf['segment_distance_m']) * 100,
+            0
+        )
+        
+        # Classify terrain
+        route_gdf['terrain_type'] = np.select([
+            route_gdf['grade_percent'] > 15,
+            route_gdf['grade_percent'] > 8,
+            route_gdf['grade_percent'] > 2,
+            route_gdf['grade_percent'] > -2,
+            route_gdf['grade_percent'] > -8,
+            route_gdf['grade_percent'] > -15
+        ], [
+            'very_steep_uphill',
+            'steep_uphill',
+            'moderate_uphill',
+            'level',
+            'moderate_downhill',
+            'steep_downhill'
+        ], default='very_steep_downhill')
+        
+        # Add smoothed elevation (rolling average)
+        window_size = min(5, len(route_gdf))
+        if window_size > 1:
+            route_gdf['elevation_smoothed'] = route_gdf['elevation'].rolling(
+                window=window_size, center=True, min_periods=1
+            ).mean()
+        else:
+            route_gdf['elevation_smoothed'] = route_gdf['elevation']
+        
+        return route_gdf
+    
+    def generate_profile_data_spatial(self, route_result: Dict[str, Any], 
+                                    use_geodataframe: bool = True,
+                                    interpolate_points: int = 0) -> Dict[str, Any]:
+        """Generate elevation profile data using spatial operations
+        
+        Args:
+            route_result: Route result from optimizer
+            use_geodataframe: Whether to use GeoDataFrame-based analysis
+            interpolate_points: Number of points to interpolate between nodes
+            
+        Returns:
+            Dictionary with enhanced elevation profile data
+        """
+        if not use_geodataframe:
+            return self.generate_profile_data(route_result)
+        
+        if not route_result or not route_result.get('route'):
+            return {}
+        
+        route = route_result['route']
+        route_gdf = self.get_route_geodataframe(route)
+        
+        if route_gdf.empty:
+            return {}
+        
+        # Add return segment to start
+        if len(route) > 1:
+            start_node = route[0]
+            end_node = route[-1]
+            return_distance = self._get_network_distance(end_node, start_node)
+            
+            # Add return segment
+            start_row = route_gdf.iloc[0].copy()
+            start_row['route_index'] = len(route_gdf)
+            start_row['segment_distance_m'] = return_distance
+            start_row['cumulative_distance_m'] = route_gdf.iloc[-1]['cumulative_distance_m'] + return_distance
+            start_row['elevation_change_m'] = start_row['elevation'] - route_gdf.iloc[-1]['elevation']
+            start_row['grade_percent'] = (start_row['elevation_change_m'] / return_distance * 100) if return_distance > 0 else 0
+            
+            # Add to GeoDataFrame
+            route_gdf = pd.concat([route_gdf, start_row.to_frame().T], ignore_index=True)
+        
+        # Interpolate additional points if requested
+        if interpolate_points > 0:
+            route_gdf = self._interpolate_elevation_points(route_gdf, interpolate_points)
+        
+        # Calculate enhanced statistics
+        elevation_stats = self._calculate_elevation_stats_spatial(route_gdf)
+        
+        # Convert to standard format
+        coordinates = []
+        for _, row in route_gdf.iterrows():
+            coordinates.append({
+                'latitude': row['geometry'].y,
+                'longitude': row['geometry'].x,
+                'node_id': row['node_id'] if 'node_id' in row else None
+            })
+        
+        return {
+            'coordinates': coordinates,
+            'elevations': route_gdf['elevation'].tolist(),
+            'distances_m': route_gdf['cumulative_distance_m'].tolist(),
+            'distances_km': (route_gdf['cumulative_distance_m'] / 1000).tolist(),
+            'total_distance_km': route_gdf['cumulative_distance_m'].iloc[-1] / 1000,
+            'elevation_stats': elevation_stats,
+            'grade_profile': route_gdf['grade_percent'].tolist(),
+            'terrain_profile': route_gdf['terrain_type'].tolist(),
+            'geodataframe_used': True
+        }
+    
+    def _calculate_elevation_stats_spatial(self, route_gdf: gpd.GeoDataFrame) -> Dict[str, Any]:
+        """Calculate elevation statistics using spatial operations
+        
+        Args:
+            route_gdf: GeoDataFrame with route elevation data
+            
+        Returns:
+            Dictionary with elevation statistics
+        """
+        if route_gdf.empty:
+            return {}
+        
+        # Basic elevation statistics
+        elevation_stats = {
+            'min_elevation': route_gdf['elevation'].min(),
+            'max_elevation': route_gdf['elevation'].max(),
+            'elevation_range': route_gdf['elevation'].max() - route_gdf['elevation'].min(),
+            'avg_elevation': route_gdf['elevation'].mean(),
+            'elevation_std': route_gdf['elevation'].std(),
+            'median_elevation': route_gdf['elevation'].median()
+        }
+        
+        # Elevation gain/loss analysis
+        elevation_gain = route_gdf[route_gdf['elevation_change_m'] > 0]['elevation_change_m'].sum()
+        elevation_loss = abs(route_gdf[route_gdf['elevation_change_m'] < 0]['elevation_change_m'].sum())
+        
+        elevation_stats.update({
+            'total_elevation_gain_m': elevation_gain,
+            'total_elevation_loss_m': elevation_loss,
+            'net_elevation_change_m': elevation_gain - elevation_loss
+        })
+        
+        # Grade analysis
+        grade_stats = {
+            'max_grade': route_gdf['grade_percent'].max(),
+            'min_grade': route_gdf['grade_percent'].min(),
+            'avg_grade': route_gdf['grade_percent'].mean(),
+            'grade_std': route_gdf['grade_percent'].std()
+        }
+        
+        # Terrain distribution
+        terrain_counts = route_gdf['terrain_type'].value_counts()
+        terrain_distribution = {}
+        total_points = len(route_gdf)
+        
+        for terrain_type in terrain_counts.index:
+            count = terrain_counts[terrain_type]
+            terrain_distribution[terrain_type] = {
+                'count': count,
+                'percentage': (count / total_points * 100) if total_points > 0 else 0
+            }
+        
+        # Steep sections analysis
+        steep_sections = self._find_steep_sections_spatial(route_gdf)
+        
+        elevation_stats.update({
+            'grade_statistics': grade_stats,
+            'terrain_distribution': terrain_distribution,
+            'steep_sections': steep_sections,
+            'steep_section_count': len(steep_sections)
+        })
+        
+        return elevation_stats
+    
+    def _find_steep_sections_spatial(self, route_gdf: gpd.GeoDataFrame, 
+                                   min_grade: float = 8.0) -> List[Dict[str, Any]]:
+        """Find steep sections using spatial operations
+        
+        Args:
+            route_gdf: GeoDataFrame with route data
+            min_grade: Minimum grade to consider steep
+            
+        Returns:
+            List of steep section dictionaries
+        """
+        if route_gdf.empty:
+            return []
+        
+        steep_sections = []
+        
+        # Find steep uphill sections
+        steep_uphill = route_gdf[route_gdf['grade_percent'] > min_grade]
+        if not steep_uphill.empty:
+            # Group consecutive steep sections
+            steep_groups = self._group_consecutive_sections(steep_uphill)
+            for group in steep_groups:
+                steep_sections.append({
+                    'type': 'uphill',
+                    'start_km': group['cumulative_distance_m'].iloc[0] / 1000,
+                    'end_km': group['cumulative_distance_m'].iloc[-1] / 1000,
+                    'distance_km': (group['cumulative_distance_m'].iloc[-1] - group['cumulative_distance_m'].iloc[0]) / 1000,
+                    'max_grade': group['grade_percent'].max(),
+                    'avg_grade': group['grade_percent'].mean(),
+                    'elevation_change': group['elevation_change_m'].sum()
+                })
+        
+        # Find steep downhill sections
+        steep_downhill = route_gdf[route_gdf['grade_percent'] < -min_grade]
+        if not steep_downhill.empty:
+            steep_groups = self._group_consecutive_sections(steep_downhill)
+            for group in steep_groups:
+                steep_sections.append({
+                    'type': 'downhill',
+                    'start_km': group['cumulative_distance_m'].iloc[0] / 1000,
+                    'end_km': group['cumulative_distance_m'].iloc[-1] / 1000,
+                    'distance_km': (group['cumulative_distance_m'].iloc[-1] - group['cumulative_distance_m'].iloc[0]) / 1000,
+                    'max_grade': abs(group['grade_percent'].min()),
+                    'avg_grade': abs(group['grade_percent'].mean()),
+                    'elevation_change': abs(group['elevation_change_m'].sum())
+                })
+        
+        return steep_sections
+    
+    def _group_consecutive_sections(self, sections_gdf: gpd.GeoDataFrame) -> List[gpd.GeoDataFrame]:
+        """Group consecutive sections
+        
+        Args:
+            sections_gdf: GeoDataFrame with sections
+            
+        Returns:
+            List of GeoDataFrames with grouped sections
+        """
+        if sections_gdf.empty:
+            return []
+        
+        groups = []
+        current_group = []
+        
+        for i, (idx, row) in enumerate(sections_gdf.iterrows()):
+            if i == 0:
+                current_group = [idx]
+            else:
+                # Check if this section is consecutive to the previous
+                prev_idx = current_group[-1]
+                if idx == prev_idx + 1:
+                    current_group.append(idx)
+                else:
+                    # Start new group
+                    if current_group:
+                        groups.append(sections_gdf.loc[current_group])
+                    current_group = [idx]
+        
+        # Add last group
+        if current_group:
+            groups.append(sections_gdf.loc[current_group])
+        
+        return groups
+    
+    def _interpolate_elevation_points(self, route_gdf: gpd.GeoDataFrame, 
+                                    points_per_segment: int) -> gpd.GeoDataFrame:
+        """Interpolate additional elevation points between nodes
+        
+        Args:
+            route_gdf: GeoDataFrame with route data
+            points_per_segment: Number of points to interpolate per segment
+            
+        Returns:
+            GeoDataFrame with interpolated points
+        """
+        if route_gdf.empty or points_per_segment <= 0:
+            return route_gdf
+        
+        interpolated_data = []
+        
+        for i in range(len(route_gdf) - 1):
+            current_row = route_gdf.iloc[i]
+            next_row = route_gdf.iloc[i + 1]
+            
+            # Add current point
+            interpolated_data.append(current_row)
+            
+            # Interpolate between current and next point
+            for j in range(1, points_per_segment + 1):
+                fraction = j / (points_per_segment + 1)
+                
+                # Interpolate coordinates
+                x_interp = current_row['geometry'].x + fraction * (next_row['geometry'].x - current_row['geometry'].x)
+                y_interp = current_row['geometry'].y + fraction * (next_row['geometry'].y - current_row['geometry'].y)
+                
+                # Interpolate elevation
+                elev_interp = current_row['elevation'] + fraction * (next_row['elevation'] - current_row['elevation'])
+                
+                # Interpolate distance
+                dist_interp = current_row['cumulative_distance_m'] + fraction * (next_row['cumulative_distance_m'] - current_row['cumulative_distance_m'])
+                
+                interpolated_data.append({
+                    'node_id': None,  # Interpolated point
+                    'route_index': current_row['route_index'] + fraction,
+                    'elevation': elev_interp,
+                    'segment_distance_m': 0,  # Will be recalculated
+                    'cumulative_distance_m': dist_interp,
+                    'geometry': Point(x_interp, y_interp)
+                })
+        
+        # Add last point
+        interpolated_data.append(route_gdf.iloc[-1])
+        
+        # Create new GeoDataFrame
+        interpolated_gdf = gpd.GeoDataFrame(interpolated_data, crs='EPSG:4326')
+        
+        # Recalculate segment distances and add analysis columns
+        if not interpolated_gdf.empty:
+            interpolated_gdf = self._add_elevation_analysis_columns(interpolated_gdf)
+        
+        return interpolated_gdf
+    
+    def find_elevation_peaks_valleys_spatial(self, route_result: Dict[str, Any], 
+                                           min_prominence: float = 10) -> Dict[str, List]:
+        """Find elevation peaks and valleys using spatial operations
+        
+        Args:
+            route_result: Route result from optimizer
+            min_prominence: Minimum elevation change to be considered a peak/valley
+            
+        Returns:
+            Dictionary with peaks and valleys with enhanced spatial data
+        """
+        if not route_result or not route_result.get('route'):
+            return {'peaks': [], 'valleys': []}
+        
+        route = route_result['route']
+        route_gdf = self.get_route_geodataframe(route)
+        
+        if route_gdf.empty:
+            return {'peaks': [], 'valleys': []}
+        
+        peaks = []
+        valleys = []
+        
+        # Use smoothed elevation for better peak/valley detection
+        elevations = route_gdf['elevation_smoothed'].values
+        distances_km = (route_gdf['cumulative_distance_m'] / 1000).values
+        
+        # Find local maxima and minima
+        for i in range(1, len(elevations) - 1):
+            current_elev = elevations[i]
+            prev_elev = elevations[i - 1]
+            next_elev = elevations[i + 1]
+            
+            # Check for peak
+            if current_elev > prev_elev and current_elev > next_elev:
+                prominence = min(current_elev - prev_elev, current_elev - next_elev)
+                if prominence >= min_prominence:
+                    peaks.append({
+                        'distance_km': distances_km[i],
+                        'elevation': current_elev,
+                        'prominence': prominence,
+                        'coordinate': {
+                            'latitude': route_gdf.iloc[i]['geometry'].y,
+                            'longitude': route_gdf.iloc[i]['geometry'].x
+                        },
+                        'terrain_type': route_gdf.iloc[i]['terrain_type']
+                    })
+            
+            # Check for valley
+            elif current_elev < prev_elev and current_elev < next_elev:
+                prominence = min(prev_elev - current_elev, next_elev - current_elev)
+                if prominence >= min_prominence:
+                    valleys.append({
+                        'distance_km': distances_km[i],
+                        'elevation': current_elev,
+                        'prominence': prominence,
+                        'coordinate': {
+                            'latitude': route_gdf.iloc[i]['geometry'].y,
+                            'longitude': route_gdf.iloc[i]['geometry'].x
+                        },
+                        'terrain_type': route_gdf.iloc[i]['terrain_type']
+                    })
+        
+        return {
+            'peaks': peaks,
+            'valleys': valleys,
+            'peak_count': len(peaks),
+            'valley_count': len(valleys),
+            'total_prominence': sum(p['prominence'] for p in peaks) + sum(v['prominence'] for v in valleys)
+        }
+    
+    def get_elevation_zones_spatial(self, route_result: Dict[str, Any], 
+                                  zone_count: int = 5) -> List[Dict[str, Any]]:
+        """Divide route into elevation zones using spatial operations
+        
+        Args:
+            route_result: Route result from optimizer
+            zone_count: Number of zones to create
+            
+        Returns:
+            List of zone dictionaries with enhanced spatial data
+        """
+        if not route_result or not route_result.get('route'):
+            return []
+        
+        route = route_result['route']
+        route_gdf = self.get_route_geodataframe(route)
+        
+        if route_gdf.empty:
+            return []
+        
+        if len(route_gdf) < zone_count:
+            zone_count = len(route_gdf)
+        
+        zones = []
+        points_per_zone = len(route_gdf) // zone_count
+        
+        for i in range(zone_count):
+            start_idx = i * points_per_zone
+            if i == zone_count - 1:
+                end_idx = len(route_gdf)
+            else:
+                end_idx = (i + 1) * points_per_zone
+            
+            zone_gdf = route_gdf.iloc[start_idx:end_idx]
+            
+            if not zone_gdf.empty:
+                # Calculate zone statistics
+                zone_stats = {
+                    'zone_number': i + 1,
+                    'start_km': zone_gdf['cumulative_distance_m'].iloc[0] / 1000,
+                    'end_km': zone_gdf['cumulative_distance_m'].iloc[-1] / 1000,
+                    'distance_km': (zone_gdf['cumulative_distance_m'].iloc[-1] - zone_gdf['cumulative_distance_m'].iloc[0]) / 1000,
+                    'min_elevation': zone_gdf['elevation'].min(),
+                    'max_elevation': zone_gdf['elevation'].max(),
+                    'avg_elevation': zone_gdf['elevation'].mean(),
+                    'elevation_change': zone_gdf['elevation'].iloc[-1] - zone_gdf['elevation'].iloc[0],
+                    'elevation_gain': zone_gdf[zone_gdf['elevation_change_m'] > 0]['elevation_change_m'].sum(),
+                    'elevation_loss': abs(zone_gdf[zone_gdf['elevation_change_m'] < 0]['elevation_change_m'].sum()),
+                    'avg_grade': zone_gdf['grade_percent'].mean(),
+                    'max_grade': zone_gdf['grade_percent'].max(),
+                    'min_grade': zone_gdf['grade_percent'].min(),
+                    'dominant_terrain': zone_gdf['terrain_type'].mode().iloc[0] if not zone_gdf['terrain_type'].mode().empty else 'unknown',
+                    'point_count': len(zone_gdf)
+                }
+                
+                zones.append(zone_stats)
+        
+        return zones
