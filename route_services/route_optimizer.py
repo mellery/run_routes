@@ -268,7 +268,11 @@ class RouteOptimizer:
         working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
         
         # Create GA optimizer with appropriate configuration
-        config = GAConfig(allow_bidirectional_segments=allow_bidirectional_segments)
+        config = GAConfig(
+            allow_bidirectional_segments=allow_bidirectional_segments,
+            use_distance_compliant_initialization=True,
+            use_constraint_preserving_operators=True
+        )
         
         # Create filtered GA optimizer if needed
         if exclude_footways and working_graph != self.graph:

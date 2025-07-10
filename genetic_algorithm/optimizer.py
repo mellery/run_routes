@@ -19,7 +19,9 @@ logger = logging.getLogger(__name__)
 
 from .chromosome import RouteChromosome
 from .population import PopulationInitializer
+from .distance_compliant_population import DistanceCompliantPopulationInitializer
 from .operators import GAOperators
+from .constraint_preserving_operators import ConstraintPreservingOperators, RouteConstraints
 from .fitness import GAFitnessEvaluator, FitnessObjective
 from .performance import GASegmentCache
 
@@ -46,8 +48,14 @@ class GAConfig:
     adaptive_sizing: bool = True
     verbose: bool = True
     
+    # Population initialization method
+    use_distance_compliant_initialization: bool = True  # Use improved distance-compliant initializer
+    
     # Segment usage constraints
     allow_bidirectional_segments: bool = True  # Allow using segments in both directions
+    
+    # Constraint-preserving operators
+    use_constraint_preserving_operators: bool = True  # Use constraint-preserving crossover/mutation
     
     # Enhanced 1m precision settings
     enable_precision_enhancement: bool = False  # Disabled by default for stability
@@ -97,6 +105,7 @@ class GeneticRouteOptimizer:
         # Initialize components
         self.population_initializer = None
         self.operators = GAOperators(graph, self.config.allow_bidirectional_segments)
+        self.constraint_operators = None  # Will be initialized in _setup_optimization
         self.fitness_evaluator = None
         
         # Enhanced 1m precision components - disabled by default for testing
@@ -334,8 +343,15 @@ class GeneticRouteOptimizer:
     
     def _setup_optimization(self, start_node: int, distance_km: float, objective: str):
         """Setup optimization components"""
-        # Initialize population initializer
-        self.population_initializer = PopulationInitializer(self.graph, start_node, self.config.allow_bidirectional_segments)
+        # Initialize population initializer (choose between old and new)
+        if self.config.use_distance_compliant_initialization:
+            if self.config.verbose:
+                print("🎯 Using distance-compliant population initialization")
+            self.population_initializer = DistanceCompliantPopulationInitializer(self.graph, start_node)
+        else:
+            if self.config.verbose:
+                print("🎲 Using traditional population initialization")
+            self.population_initializer = PopulationInitializer(self.graph, start_node, self.config.allow_bidirectional_segments)
         
         # Initialize fitness evaluator with segment cache
         self.fitness_evaluator = GAFitnessEvaluator(
@@ -343,6 +359,26 @@ class GeneticRouteOptimizer:
             enable_micro_terrain=True, 
             allow_bidirectional_segments=self.config.allow_bidirectional_segments
         )
+        
+        # Initialize constraint-preserving operators if enabled
+        if self.config.use_constraint_preserving_operators:
+            if self.config.verbose:
+                print("🔧 Using constraint-preserving genetic operators")
+            
+            constraints = RouteConstraints(
+                min_distance_km=distance_km * 0.85,
+                max_distance_km=distance_km * 1.15,
+                start_node=start_node,
+                must_return_to_start=True,
+                must_be_connected=True,
+                allow_bidirectional=self.config.allow_bidirectional_segments
+            )
+            
+            self.constraint_operators = ConstraintPreservingOperators(self.graph, constraints)
+        else:
+            if self.config.verbose:
+                print("⚙️ Using standard genetic operators")
+            self.constraint_operators = None
         
         # Reset tracking
         self.generation = 0
@@ -422,18 +458,32 @@ class GeneticRouteOptimizer:
             parent1 = self.operators.tournament_selection(population, self.config.tournament_size)
             parent2 = self.operators.tournament_selection(population, self.config.tournament_size)
             
-            # Use standard crossover (precision operators need more integration work)
-            offspring1, offspring2 = self.operators.segment_exchange_crossover(
-                parent1, parent2, self.config.crossover_rate
-            )
-            
-            # Use standard mutation (precision operators need more integration work)
-            offspring1 = self.operators.segment_replacement_mutation(
-                offspring1, self.config.mutation_rate
-            )
-            offspring2 = self.operators.route_extension_mutation(
-                offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
-            )
+            # Use constraint-preserving operators if available
+            if self.constraint_operators:
+                # Use constraint-preserving crossover
+                offspring1, offspring2 = self.constraint_operators.connection_point_crossover(
+                    parent1, parent2, self.config.crossover_rate
+                )
+                
+                # Use constraint-preserving mutation
+                offspring1 = self.constraint_operators.distance_neutral_mutation(
+                    offspring1, self.config.mutation_rate
+                )
+                offspring2 = self.constraint_operators.distance_neutral_mutation(
+                    offspring2, self.config.mutation_rate
+                )
+            else:
+                # Use standard operators
+                offspring1, offspring2 = self.operators.segment_exchange_crossover(
+                    parent1, parent2, self.config.crossover_rate
+                )
+                
+                offspring1 = self.operators.segment_replacement_mutation(
+                    offspring1, self.config.mutation_rate
+                )
+                offspring2 = self.operators.route_extension_mutation(
+                    offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
+                )
             
             # Add to population
             new_population.extend([offspring1, offspring2])
@@ -487,11 +537,17 @@ class GeneticRouteOptimizer:
         
         original_size = len(population)
         
-        # Apply survival selection with fitness threshold
+        # Apply survival selection with adaptive fitness threshold
+        avg_fitness = sum(fitness_scores) / len(fitness_scores) if fitness_scores else 0.0
+        adaptive_threshold = max(0.02, avg_fitness * 0.25)  # 25% of average, minimum 0.02
+        
+        if self.config.verbose and original_size > 10:  # Only show for substantial populations
+            print(f"   📊 Survival filtering: avg_fitness={avg_fitness:.3f}, threshold={adaptive_threshold:.3f}")
+        
         filtered_population, filtered_fitness_scores = self.operators.survival_selection(
             population, fitness_scores,
             survival_rate=0.8,  # Keep 80% of population
-            min_fitness_threshold=0.1  # Remove chromosomes with fitness < 0.1
+            min_fitness_threshold=adaptive_threshold  # Adaptive threshold based on population quality
         )
         
         # If population became too small, replenish with new random chromosomes
