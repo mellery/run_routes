@@ -289,8 +289,8 @@ def run_coverage_tests():
             "--cov=ga_performance",
             "--cov=route",
             "--cov=graph_cache",
-            "--cov-report=html:htmlcov",
-            "--cov-report=xml:coverage.xml",
+            "--cov-report=html:tests/htmlcov",
+            "--cov-report=xml:tests/coverage.xml",
             "--cov-report=term-missing",
             "--cov-branch",
             "--cov-fail-under=80",
@@ -302,8 +302,8 @@ def run_coverage_tests():
         
         if result.returncode == 0:
             print("✅ Coverage tests completed successfully")
-            print("📊 Coverage report generated: htmlcov/index.html")
-            print("📈 Coverage XML generated: coverage.xml")
+            print("📊 Coverage report generated: tests/htmlcov/index.html")
+            print("📈 Coverage XML generated: tests/coverage.xml")
             return True
         else:
             print(f"❌ Coverage tests failed with exit code: {result.returncode}")
@@ -385,7 +385,7 @@ def main():
         success = run_coverage_tests()
         all_success = all_success and success
         if success:
-            print("✅ Coverage tests completed - view htmlcov/index.html for detailed report")
+            print("✅ Coverage tests completed - view tests/htmlcov/index.html for detailed report")
         else:
             print("❌ Coverage tests failed")
     

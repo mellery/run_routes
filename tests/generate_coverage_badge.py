@@ -92,15 +92,15 @@ def generate_badge_markdown(coverage_data):
     
     # Combined coverage badge
     combined_url = generate_badge_url("coverage", f"{combined_rate}%25", combined_color)
-    badges.append(f"[![Coverage]({combined_url})](htmlcov/index.html)")
+    badges.append(f"[![Coverage]({combined_url})](tests/htmlcov/index.html)")
     
     # Line coverage badge
     line_url = generate_badge_url("lines", f"{line_rate}%25", line_color)
-    badges.append(f"[![Lines]({line_url})](htmlcov/index.html)")
+    badges.append(f"[![Lines]({line_url})](tests/htmlcov/index.html)")
     
     # Branch coverage badge
     branch_url = generate_badge_url("branches", f"{branch_rate}%25", branch_color)
-    badges.append(f"[![Branches]({branch_url})](htmlcov/index.html)")
+    badges.append(f"[![Branches]({branch_url})](tests/htmlcov/index.html)")
     
     return " ".join(badges)
 
@@ -133,7 +133,7 @@ def generate_coverage_summary(coverage_data):
         summary += "🔴 **CRITICAL** - Very low coverage, immediate action needed\n"
     
     summary += f"\n*Last updated: {coverage_data['timestamp']}*\n"
-    summary += "\n**View detailed coverage report:** [htmlcov/index.html](htmlcov/index.html)\n"
+    summary += "\n**View detailed coverage report:** [tests/htmlcov/index.html](tests/htmlcov/index.html)\n"
     
     return summary
 
@@ -159,14 +159,14 @@ def run_coverage_tests():
             "--cov=tsp_solver",
             "--cov=tsp_solver_fast",
             "--cov=graph_cache",
-            "--cov-report=html:htmlcov",
-            "--cov-report=xml:coverage.xml",
+            "--cov-report=html:tests/htmlcov",
+            "--cov-report=xml:tests/coverage.xml",
             "--cov-report=term-missing",
             "--cov-branch",
             "-q"  # Quiet output
         ]
         
-        result = subprocess.run(cmd, capture_output=True, text=True, cwd="/home/mike/src/run_routes")
+        result = subprocess.run(cmd, capture_output=True, text=True, cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         
         if result.returncode == 0:
             print("✅ Tests completed successfully")
@@ -190,7 +190,7 @@ def main():
         return
     
     # Parse coverage data
-    coverage_data = parse_coverage_xml()
+    coverage_data = parse_coverage_xml("tests/coverage.xml")
     
     if not coverage_data:
         print("❌ Failed to parse coverage data")
@@ -203,13 +203,13 @@ def main():
     coverage_summary = generate_coverage_summary(coverage_data)
     
     # Save badge markdown to file
-    with open("coverage_badges.md", "w") as f:
+    with open("tests/coverage_badges.md", "w") as f:
         f.write("# Coverage Badges\\n\\n")
         f.write(badge_markdown + "\\n\\n")
         f.write(coverage_summary)
     
     # Save coverage data as JSON
-    with open("coverage_data.json", "w") as f:
+    with open("tests/coverage_data.json", "w") as f:
         json.dump(coverage_data, f, indent=2)
     
     # Print results
@@ -219,10 +219,10 @@ def main():
     print(f"   Branch Coverage: {coverage_data['branch_rate']}%")
     
     print(f"\\n📁 Generated files:")
-    print(f"   📄 coverage_badges.md - Badge markdown")
-    print(f"   📊 htmlcov/index.html - Detailed HTML report")
-    print(f"   📈 coverage.xml - XML coverage data")
-    print(f"   💾 coverage_data.json - JSON coverage data")
+    print(f"   📄 tests/coverage_badges.md - Badge markdown")
+    print(f"   📊 tests/htmlcov/index.html - Detailed HTML report")
+    print(f"   📈 tests/coverage.xml - XML coverage data")
+    print(f"   💾 tests/coverage_data.json - JSON coverage data")
     
     print(f"\\n🏷️ Badge Markdown:")
     print(badge_markdown)

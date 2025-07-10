@@ -91,6 +91,8 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
 def list_cached_graphs():
     """List all available cached graphs"""
     
+    # Ensure cache directory exists
+    os.makedirs('cache', exist_ok=True)
     cache_files = [f for f in os.listdir('cache') if f.startswith('cached_graph_') and f.endswith('.pkl')]
     
     if not cache_files:
@@ -103,9 +105,10 @@ def list_cached_graphs():
     valid_caches = []
     for cache_file in sorted(cache_files):
         try:
-            graph = load_cached_graph(cache_file)
+            cache_path = os.path.join('cache', cache_file)
+            graph = load_cached_graph(cache_path)
             if graph is not None:
-                file_size_mb = os.path.getsize(os.path.join('cache', cache_file)) / (1024 * 1024)
+                file_size_mb = os.path.getsize(cache_path) / (1024 * 1024)
                 print(f"✅ {cache_file} ({file_size_mb:.1f}MB)")
                 valid_caches.append(cache_file)
             else:
@@ -119,6 +122,8 @@ def list_cached_graphs():
 def clean_cache(keep_latest=True):
     """Clean up old or invalid cache files"""
     
+    # Ensure cache directory exists
+    os.makedirs('cache', exist_ok=True)
     cache_files = [f for f in os.listdir('cache') if f.startswith('cached_graph_') and f.endswith('.pkl')]
     
     if not cache_files:
@@ -133,10 +138,11 @@ def clean_cache(keep_latest=True):
     
     for i, cache_file in enumerate(cache_files):
         try:
+            cache_path = os.path.join('cache', cache_file)
             # Keep the first (newest) file if keep_latest is True
             if keep_latest and i == 0:
                 # Validate the newest file
-                graph = load_cached_graph(cache_file)
+                graph = load_cached_graph(cache_path)
                 if graph is not None:
                     print(f"✅ Keeping latest cache: {cache_file}")
                     kept_count += 1
@@ -145,7 +151,7 @@ def clean_cache(keep_latest=True):
                     print(f"❌ Latest cache invalid, removing: {cache_file}")
             
             # Remove older or invalid files
-            os.remove(cache_file)
+            os.remove(cache_path)
             print(f"🗑️ Removed: {cache_file}")
             removed_count += 1
             

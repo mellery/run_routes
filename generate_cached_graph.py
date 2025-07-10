@@ -27,7 +27,7 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
     """
     
     if cache_file is None:
-        cache_file = f"cache/cached_graph_{radius_m}m_{network_type}.pkl"
+        cache_file = get_cache_filename(center_point, radius_m, network_type)
     
     print(f"🌐 Generating cached graph for Christiansburg, VA...")
     print(f"   Parameters: {radius_m}m radius, {network_type} network")
@@ -210,9 +210,11 @@ def load_cached_graph(cache_file):
         return None
 
 def get_cache_filename(center_point, radius_m, network_type='all'):
-    """Generate standardized cache filename"""
+    """Generate standardized cache filename with cache directory"""
     lat, lon = center_point
-    return f"cached_graph_{lat:.4f}_{lon:.4f}_{radius_m}m_{network_type}.pkl"
+    # Ensure cache directory exists
+    os.makedirs('cache', exist_ok=True)
+    return f"cache/cached_graph_{lat:.4f}_{lon:.4f}_{radius_m}m_{network_type}.pkl"
 
 def main():
     """Main function for command line usage"""

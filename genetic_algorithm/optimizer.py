@@ -347,7 +347,7 @@ class GeneticRouteOptimizer:
         if self.config.use_distance_compliant_initialization:
             if self.config.verbose:
                 print("🎯 Using distance-compliant population initialization")
-            self.population_initializer = DistanceCompliantPopulationInitializer(self.graph, start_node)
+            self.population_initializer = DistanceCompliantPopulationInitializer(self.graph, start_node, distance_km * 1.2)  # 20% buffer
         else:
             if self.config.verbose:
                 print("🎲 Using traditional population initialization")
@@ -395,6 +395,12 @@ class GeneticRouteOptimizer:
         if distance_km < 3.0:
             self.config.population_size = max(50, self.config.population_size // 2)
             self.config.max_generations = max(100, self.config.max_generations // 2)
+        elif distance_km > 20.0:
+            # Very long routes: smaller population to avoid timeouts during population creation
+            self.config.population_size = max(30, self.config.population_size // 3)
+            self.config.max_generations = max(50, self.config.max_generations // 2)
+            if self.config.verbose:
+                print(f"🏃‍♂️ Adapted for very long route: population={self.config.population_size}, generations={self.config.max_generations}")
         elif distance_km > 8.0:
             self.config.population_size = min(200, int(self.config.population_size * 1.5))
             self.config.max_generations = min(500, int(self.config.max_generations * 1.5))

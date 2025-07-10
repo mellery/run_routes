@@ -6,6 +6,7 @@ A production-ready approach that creates populations meeting distance constraint
 
 import random
 import math
+import time
 import networkx as nx
 import numpy as np
 from typing import List, Optional, Tuple
@@ -16,14 +17,16 @@ from .chromosome import RouteChromosome, RouteSegment
 class DistanceCompliantPopulationInitializer:
     """Creates distance-compliant routes using a simple but effective approach"""
     
-    def __init__(self, graph: nx.Graph, start_node: int):
+    def __init__(self, graph: nx.Graph, start_node: int, max_route_distance_km: float = 25.0):
         self.graph = graph
         self.start_node = start_node
         
-        # Pre-compute distance matrix for efficiency
-        print("Pre-computing distances from start node...")
+        # Pre-compute distance matrix for efficiency - use adaptive cutoff
+        # For spiral_out routes, we need up to 40% of the route distance as outbound distance
+        cutoff_distance_m = max(8000, max_route_distance_km * 1000 * 0.5)  # At least 8km or 50% of max route
+        print(f"Pre-computing distances from start node (cutoff: {cutoff_distance_m/1000:.1f}km)...")
         self.distances_from_start = nx.single_source_dijkstra_path_length(
-            graph, start_node, weight='length', cutoff=8000  # 8km max
+            graph, start_node, weight='length', cutoff=cutoff_distance_m
         )
         
         # Group nodes by distance ranges for efficient selection
@@ -47,19 +50,43 @@ class DistanceCompliantPopulationInitializer:
         print(f"\nCreating {size} distance-compliant routes")
         print(f"Target: {target_distance_km}km ({target_distance_m}m)")
         print(f"Range: {min_distance/1000:.2f}km - {max_distance/1000:.2f}km")
+        print(f"Max reachable distance: {max(self.distances_from_start.values(), default=0)/1000:.2f}km")
         
-        strategies = [
-            ('out_and_back', 0.4),      # 40% - Simple out and back
-            ('triangle_route', 0.3),     # 30% - Three-point triangle
-            ('figure_eight', 0.2),       # 20% - Figure-8 pattern
-            ('spiral_out', 0.1)          # 10% - Spiral outward
-        ]
+        # Adjust strategy mix based on route distance
+        if target_distance_km > 15:
+            # For long routes, prioritize simple strategies
+            strategies = [
+                ('out_and_back', 0.6),      # 60% - Simple out and back (most reliable)
+                ('triangle_route', 0.3),     # 30% - Three-point triangle
+                ('figure_eight', 0.1),       # 10% - Figure-8 pattern
+                # Skip spiral_out for very long routes as it's computationally expensive
+            ]
+            print("🏃‍♂️ Using simplified strategies for long route")
+        else:
+            strategies = [
+                ('out_and_back', 0.4),      # 40% - Simple out and back
+                ('triangle_route', 0.3),     # 30% - Three-point triangle
+                ('figure_eight', 0.2),       # 20% - Figure-8 pattern
+                ('spiral_out', 0.1)          # 10% - Spiral outward
+            ]
+        
+        # Add timeout for population creation (2 minutes max)
+        start_time = time.time()
+        timeout_seconds = 120
         
         for strategy_name, proportion in strategies:
+            if time.time() - start_time > timeout_seconds:
+                print(f"⏰ Population creation timeout - created {len(population)} routes so far")
+                break
+                
             count = int(size * proportion)
             print(f"\nCreating {count} {strategy_name} routes...")
             
             for i in range(count):
+                if time.time() - start_time > timeout_seconds:
+                    print(f"⏰ Timeout reached during {strategy_name} creation")
+                    break
+                    
                 route = self._create_route_by_strategy(
                     strategy_name, target_distance_m, min_distance, max_distance
                 )
@@ -70,8 +97,15 @@ class DistanceCompliantPopulationInitializer:
                     
                     if len(population) % 10 == 0:
                         print(f"  Created {len(population)} routes...")
+                elif strategy_name == 'spiral_out':
+                    # Skip remaining spiral_out attempts if they're failing
+                    print(f"  Skipping remaining {strategy_name} attempts (not feasible for this distance)")
+                    break
+                else:
+                    # Print progress for debugging
+                    print(f"  Failed to create {strategy_name} route {i+1}/{count}")
         
-        # Fill remaining with best strategy
+        # Fill remaining with best strategy (prefer reliable strategies)
         while len(population) < size:
             route = self._create_route_by_strategy(
                 'out_and_back', target_distance_m, min_distance, max_distance
@@ -79,6 +113,10 @@ class DistanceCompliantPopulationInitializer:
             if route:
                 route.creation_method = 'out_and_back_extra'
                 population.append(route)
+            else:
+                # If out_and_back fails, break to avoid infinite loop
+                print(f"⚠️ Could only create {len(population)}/{size} routes - distance may be too large")
+                break
         
         print(f"✅ Created {len(population)}/{size} distance-compliant routes")
         return population[:size]
@@ -229,6 +267,12 @@ class DistanceCompliantPopulationInitializer:
                          min_distance: float, max_distance: float) -> Optional[RouteChromosome]:
         """Create spiral route with gradually increasing distance from start"""
         
+        # Quick validation: if target distances are beyond our pre-computed range, skip
+        max_waypoint_distance = target_distance_m * 0.35
+        if max_waypoint_distance > max(self.distances_from_start.values(), default=0) * 0.9:
+            # Not enough reachable nodes for this distance
+            return None
+        
         # Create a route that spirals outward with 4-5 waypoints
         num_waypoints = 4
         segments = []
@@ -304,11 +348,13 @@ class DistanceCompliantPopulationInitializer:
     
     def _find_nodes_at_distance_from_node(self, source_node: int, target_distance: float, 
                                         tolerance: float = 0.3) -> List[Tuple[int, float]]:
-        """Find nodes at target distance from a specific node"""
+        """Find nodes at target distance from a specific node (optimized with smaller cutoff)"""
         
         try:
+            # Use smaller cutoff for efficiency - only compute what we need
+            cutoff = min(target_distance * 1.5, 3000)  # Limit to 3km max to avoid expensive computation
             distances = nx.single_source_dijkstra_path_length(
-                self.graph, source_node, weight='length', cutoff=target_distance * 2
+                self.graph, source_node, weight='length', cutoff=cutoff
             )
             
             min_dist = target_distance * (1 - tolerance)
@@ -320,7 +366,7 @@ class DistanceCompliantPopulationInitializer:
                     candidates.append((node, distance))
             
             candidates.sort(key=lambda x: abs(x[1] - target_distance))
-            return candidates[:10]
+            return candidates[:5]  # Limit to 5 candidates for speed
             
         except Exception:
             return []
