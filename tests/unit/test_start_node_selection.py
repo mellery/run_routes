@@ -40,11 +40,12 @@ class TestStartNodeSelection(unittest.TestCase):
         self.test_graph.add_edge(216434573, 999999999)
         self.test_graph.add_edge(999999999, 216367653)
     
-    def test_default_start_node_exists(self):
-        """Test that default start node is used when it exists in graph"""
+    def test_dynamic_start_node_selection(self):
+        """Test that dynamic start node selection finds closest to default coordinates"""
         start_node = self.network_manager.get_start_node(self.test_graph)
         
-        self.assertEqual(start_node, NetworkManager.DEFAULT_START_NODE)
+        # Should select the node closest to DEFAULT_START_COORDINATES (37.13095, -80.40749)
+        # Node 1529188403 at (37.130950, -80.407501) is closest to the target coordinates
         self.assertEqual(start_node, 1529188403)
         self.assertIn(start_node, self.test_graph.nodes)
     
@@ -65,17 +66,17 @@ class TestStartNodeSelection(unittest.TestCase):
         
         self.assertIn("not found in graph", str(context.exception))
     
-    def test_fallback_to_closest_node(self):
-        """Test fallback to closest node when default doesn't exist"""
-        # Create graph without default node
+    def test_closest_node_selection(self):
+        """Test selection of closest node to default coordinates"""
+        # Create graph with nodes at different distances from DEFAULT_START_COORDINATES (37.13095, -80.40749)
         fallback_graph = nx.Graph()
-        fallback_graph.add_node(216434573, y=37.129844, x=-80.408813, elevation=650.0)  # 52m from center
-        fallback_graph.add_node(216367653, y=37.167446, x=-80.397347, elevation=584.0)  # 4.3km from center
+        fallback_graph.add_node(216434573, y=37.129844, x=-80.408813, elevation=650.0)  # ~200m from target
+        fallback_graph.add_node(216367653, y=37.167446, x=-80.397347, elevation=584.0)  # ~4.3km from target
         fallback_graph.add_edge(216434573, 216367653)
         
         start_node = self.network_manager.get_start_node(fallback_graph)
         
-        # Should select the node closest to center (216434573 at 52m vs 216367653 at 4.3km)
+        # Should select the node closest to DEFAULT_START_COORDINATES (216434573 is much closer)
         self.assertEqual(start_node, 216434573)
     
     def test_empty_graph_raises_error(self):
@@ -95,23 +96,20 @@ class TestStartNodeSelection(unittest.TestCase):
         self.assertIn("Graph is required", str(context.exception))
     
     def test_start_node_coordinates(self):
-        """Test that default start node has expected coordinates"""
+        """Test that selected start node is closest to default coordinates"""
         start_node = self.network_manager.get_start_node(self.test_graph)
         node_data = self.test_graph.nodes[start_node]
         
-        # Verify coordinates are in downtown Christiansburg
-        self.assertAlmostEqual(node_data['y'], 37.130950, places=5)
-        self.assertAlmostEqual(node_data['x'], -80.407501, places=5)
-        
-        # Verify it's close to center point
-        center_lat, center_lon = self.network_manager.center_point
-        self.assertAlmostEqual(node_data['y'], center_lat, delta=0.01)  # Within ~1km
-        self.assertAlmostEqual(node_data['x'], center_lon, delta=0.01)
+        # Verify coordinates are close to DEFAULT_START_COORDINATES (37.13095, -80.40749)
+        target_lat, target_lon = NetworkManager.DEFAULT_START_COORDINATES
+        self.assertAlmostEqual(node_data['y'], target_lat, delta=0.001)  # Within ~100m
+        self.assertAlmostEqual(node_data['x'], target_lon, delta=0.001)
     
-    def test_default_start_node_constant(self):
-        """Test that DEFAULT_START_NODE constant is correctly defined"""
-        self.assertEqual(NetworkManager.DEFAULT_START_NODE, 1529188403)
-        self.assertIsInstance(NetworkManager.DEFAULT_START_NODE, int)
+    def test_default_start_coordinates_constant(self):
+        """Test that DEFAULT_START_COORDINATES constant is correctly defined"""
+        self.assertEqual(NetworkManager.DEFAULT_START_COORDINATES, (37.13095, -80.40749))
+        self.assertIsInstance(NetworkManager.DEFAULT_START_COORDINATES, tuple)
+        self.assertEqual(len(NetworkManager.DEFAULT_START_COORDINATES), 2)
 
 
 class TestStartNodeIntegration(unittest.TestCase):
@@ -121,19 +119,33 @@ class TestStartNodeIntegration(unittest.TestCase):
         """Set up real network manager"""
         self.network_manager = NetworkManager()
     
-    def test_default_start_node_in_real_graph(self):
-        """Test that default start node exists in real Christiansburg graph"""
+    def test_dynamic_start_node_in_real_graph(self):
+        """Test that dynamic start node selection works with real Christiansburg graph"""
         # Load the actual Christiansburg network
         graph = self.network_manager.load_network(radius_km=5.0)
         self.assertIsNotNone(graph, "Failed to load network")
         
-        # Verify default start node exists
-        self.assertIn(NetworkManager.DEFAULT_START_NODE, graph.nodes, 
-                     f"Default start node {NetworkManager.DEFAULT_START_NODE} not found in real graph")
-        
-        # Test start node selection
+        # Test dynamic start node selection
         start_node = self.network_manager.get_start_node(graph)
-        self.assertEqual(start_node, NetworkManager.DEFAULT_START_NODE)
+        self.assertIsNotNone(start_node, "Dynamic start node selection failed")
+        self.assertIn(start_node, graph.nodes, "Selected start node not in graph")
+        
+        # Verify the selected node is close to the target coordinates
+        node_data = graph.nodes[start_node]
+        target_lat, target_lon = NetworkManager.DEFAULT_START_COORDINATES
+        
+        # Calculate distance to verify it's close
+        import math
+        def haversine_distance(lat1, lon1, lat2, lon2):
+            R = 6371000  # Earth radius in meters
+            dlat = math.radians(lat2 - lat1)
+            dlon = math.radians(lon2 - lon1)
+            a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon/2)**2
+            c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
+            return R * c
+        
+        distance = haversine_distance(target_lat, target_lon, node_data['y'], node_data['x'])
+        self.assertLess(distance, 100, f"Selected node is {distance:.0f}m from target coordinates - should be much closer")
     
     def test_start_node_location_in_real_graph(self):
         """Test that start node is in reasonable location"""
