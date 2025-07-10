@@ -214,11 +214,48 @@ class RefactoredCLIRoutePlanner:
                 print("\n⏹️ Selection cancelled")
                 return None
     
+    def ensure_network_coverage(self, target_distance_km):
+        """Ensure network is large enough for the target route distance
+        
+        Args:
+            target_distance_km: Target route distance in kilometers
+            
+        Returns:
+            True if network coverage is adequate
+        """
+        if not self.services:
+            return False
+            
+        # Calculate required network radius (target distance * 1.5 for safety margin)
+        required_radius = target_distance_km * 1.5
+        
+        # Get current network radius from NetworkManager
+        network_manager = self.services['network_manager']
+        current_radius = network_manager.DEFAULT_RADIUS_KM
+        
+        # Check if we need to expand the network
+        if required_radius > current_radius:
+            print(f"🔄 Expanding network for {target_distance_km}km route...")
+            print(f"   Current radius: {current_radius}km, Required: {required_radius}km")
+            
+            # Reinitialize services with larger radius
+            center_point = network_manager.center_point
+            success = self.initialize_services(center_point, required_radius)
+            
+            if success:
+                print(f"✅ Network expanded to {required_radius}km radius")
+                return True
+            else:
+                print(f"❌ Failed to expand network")
+                return False
+        
+        return True
+
     def generate_route(self, start_node, target_distance, objective=None, algorithm="genetic", exclude_footways=True, allow_bidirectional_segments=True):
         """Generate optimized route using route services
         
         Args:
-            start_node: Starting node ID
+            start_node: Starting node ID (or None for dynamic default)
             target_distance: Target distance in km
             objective: Route objective
             algorithm: Algorithm to use ('genetic')
@@ -231,6 +268,27 @@ class RefactoredCLIRoutePlanner:
         if not self.services:
             print("❌ Services not initialized")
             return None
+        
+        # Ensure network is large enough for the target distance
+        if not self.ensure_network_coverage(target_distance):
+            print("❌ Cannot generate route: insufficient network coverage")
+            return None
+        
+        # After potential network expansion, determine the start node
+        network_manager = self.services['network_manager']
+        graph = self.services['graph']
+        
+        # Validate or determine start node after network expansion
+        if start_node is not None:
+            # Check if user-provided start node still exists after potential network expansion
+            if start_node not in graph.nodes:
+                print(f"⚠️ Start node {start_node} not found in expanded network, using dynamic default...")
+                start_node = network_manager.get_start_node(graph)
+            else:
+                print(f"🎯 Using specified start node: {start_node}")
+        else:
+            # Use dynamic default start node
+            start_node = network_manager.get_start_node(graph)
         
         route_optimizer = self.services['route_optimizer']
         
@@ -911,20 +969,20 @@ def interactive_mode():
             elif choice == '2':
                 # Route generation
                 try:
-                    # Use pre-selected starting point or get dynamic default
+                    # Determine start node (None for dynamic default after network expansion)
                     if planner.selected_start_node:
                         start_node = planner.selected_start_node
                         print(f"✅ Using selected starting point: Node {start_node}")
                     else:
-                        # Use NetworkManager's dynamic lookup for default start node
+                        # Show current dynamic default, but allow user to choose
                         network_manager = planner.services['network_manager']
                         graph = planner.services['graph']
-                        dynamic_start_node = network_manager.get_start_node(graph)
+                        current_default = network_manager.get_start_node(graph)
                         
-                        use_default = input(f"\nUse default starting point (Node {dynamic_start_node})? (y/n): ").strip().lower()
+                        use_default = input(f"\nUse dynamic default starting point (Node {current_default})? (y/n): ").strip().lower()
                         if use_default == 'y' or use_default == '':
-                            start_node = dynamic_start_node
-                            print(f"✅ Using dynamic default starting point: Node {start_node}")
+                            start_node = None  # Triggers dynamic lookup after network expansion
+                            print(f"✅ Using dynamic default starting point")
                         else:
                             available_nodes = planner.list_starting_points(10)
                             start_input = input("\nEnter starting node (option number or node ID): ").strip()
@@ -1210,14 +1268,8 @@ choices=['genetic'],
             'difficulty': route_optimizer.RouteObjective.MINIMIZE_DIFFICULTY
         }
         
-        # Use NetworkManager to get start node (handles dynamic lookup)
-        if args.start_node is not None:
-            start_node = args.start_node
-        else:
-            # Use NetworkManager's dynamic lookup for default start node
-            network_manager = planner.services['network_manager']
-            graph = planner.services['graph']
-            start_node = network_manager.get_start_node(graph)
+        # Pass start node to generate_route (None triggers dynamic lookup after network expansion)
+        start_node = args.start_node  # None if not specified
         
         result = planner.generate_route(
             start_node, args.distance, 

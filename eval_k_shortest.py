@@ -146,12 +146,6 @@ Examples:
     )
     
     parser.add_argument(
-        '--no-filter',
-        action='store_true',
-        help='Skip footway filtering (include all edges)'
-    )
-    
-    parser.add_argument(
         '--output',
         type=str,
         help='Output filename for the plot (default: auto-generated)'
@@ -192,13 +186,9 @@ def main():
         print("❌ Failed to load network")
         return
     
-    # Apply filtering based on arguments
-    exclude_footways = not args.no_filter
-    if exclude_footways:
-        print('🔧 Applying CLI route planner filtering (exclude_footways=True)...')
-    else:
-        print('🔧 Using unfiltered network (include all edges)...')
-    graph = filter_graph_for_routing(unfiltered_graph, exclude_footways=exclude_footways)
+    # Apply CLI route planner filtering (always enabled)
+    print('🔧 Applying CLI route planner filtering (exclude_footways=True)...')
+    graph = filter_graph_for_routing(unfiltered_graph, exclude_footways=True)
     
     # Get network stats for both graphs
     unfiltered_stats = network_manager.get_network_stats(unfiltered_graph)
@@ -342,10 +332,9 @@ def main():
 
     # Add title  
     total_paths_plotted = sum(len(paths) for paths in all_paths if paths)
-    filter_status = "CLI Filtered" if exclude_footways else "Unfiltered"
     ax.set_title(f'K={args.k} Shortest Paths - {args.destinations} Destinations\n'
                 f'Using CLI Route Planner Network Data (radius: {args.radius}km)\n'
-                f'{filter_status} Network: {filtered_stats["nodes"]} nodes, {filtered_stats["edges"]} edges\n'
+                f'CLI Filtered Network: {filtered_stats["nodes"]} nodes, {filtered_stats["edges"]} edges\n'
                 f'Total paths plotted: {total_paths_plotted}', 
                  fontsize=13, pad=20)
 
@@ -384,8 +373,7 @@ def main():
     if args.output:
         filename = args.output
     else:
-        filter_suffix = "_filtered" if exclude_footways else "_unfiltered"
-        filename = f'k{args.k}_shortest_paths_{args.destinations}dest{filter_suffix}.png'
+        filename = f'k{args.k}_shortest_paths_{args.destinations}dest_cli_filtered.png'
     
     plt.savefig(filename, dpi=300, bbox_inches='tight', 
                 facecolor='white', edgecolor='none')
@@ -399,7 +387,7 @@ def main():
     print(f'  - Enhanced 3DEP elevation data: {filtered_stats["has_elevation"]}')
     print(f'  - Running weights: Applied')
     print(f'  - Network processing: Complete')
-    print(f'  - Filtering: {"Enabled" if exclude_footways else "Disabled"}')
+    print(f'  - Filtering: Always enabled (CLI default)')
     print(f'  - Network size: {filtered_stats["nodes"]} nodes, {filtered_stats["edges"]} edges')
     print(f'Number of destinations: {len(random_nodes)}')
     print(f'Paths per destination: {args.k}')
@@ -435,8 +423,8 @@ def main():
     print('Note: Using the same processed & filtered network data as cli_route_planner.py')
     print('      - Enhanced with 3DEP 1m elevation data')
     print('      - Optimized with running weights')
-    print(f'      - Footway filtering: {"Enabled" if exclude_footways else "Disabled"}')
-    print(f'      - Path opacity and thickness decrease with path rank')
+    print('      - Footway filtering: Always enabled (CLI default)')
+    print('      - Path opacity and thickness decrease with path rank')
     print(f'      - Total paths visualized: {total_paths_plotted}')
 
 if __name__ == "__main__":
