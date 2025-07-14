@@ -108,8 +108,8 @@ def main():
     """Main setup function"""
     
     # Check prerequisites
-    if not os.path.exists('srtm_20_05.tif'):
-        print("❌ Missing SRTM elevation data file: srtm_20_05.tif")
+    if not os.path.exists('elevation_data/srtm_90m/srtm_20_05.tif'):
+        print("❌ Missing SRTM elevation data file: elevation_data/srtm_90m/srtm_20_05.tif")
         print("   Please ensure the elevation data file is present")
         return 1
     

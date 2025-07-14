@@ -65,7 +65,7 @@ The project relies on several geospatial and data visualization libraries (avail
 - `graph_cache.py` - Network caching utilities
 
 ### Data Files
-- `srtm_20_05.tif` - SRTM 90m elevation data for the region
+- `elevation_data/srtm_90m/srtm_20_05.tif` - SRTM 90m elevation data for the region
 - `elevation_data/3dep_1m/` - 3DEP 1-meter elevation tiles directory
 - `elevation_data/3dep_1m/tiles/` - 3DEP tile storage
 - `valid_3dep_coordinate.txt` - Validated 3DEP coverage coordinate (36.846651, -78.409308)

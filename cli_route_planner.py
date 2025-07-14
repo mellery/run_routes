@@ -8,6 +8,7 @@ import argparse
 import sys
 import time
 import os
+from datetime import datetime
 from typing import List, Tuple
 
 # Add project root for elevation imports
@@ -32,6 +33,35 @@ try:
     ELEVATION_SOURCES_AVAILABLE = True
 except ImportError:
     ELEVATION_SOURCES_AVAILABLE = False
+
+
+def ensure_output_directory():
+    """Ensure output directory exists
+    
+    Returns:
+        str: Path to output directory
+    """
+    output_dir = "output"
+    os.makedirs(output_dir, exist_ok=True)
+    return output_dir
+
+
+def get_timestamped_filename(base_name, start_node, target_distance, extension):
+    """Generate timestamped filename in output directory
+    
+    Args:
+        base_name: Base name for the file (e.g., 'route_elevation', 'route_map')
+        start_node: Starting node ID
+        target_distance: Target distance in km
+        extension: File extension (including dot, e.g., '.png', '.gpx')
+        
+    Returns:
+        str: Full path to timestamped file in output directory
+    """
+    output_dir = ensure_output_directory()
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"{base_name}_{start_node}_{target_distance}km_{timestamp}{extension}"
+    return os.path.join(output_dir, filename)
 
 
 class RefactoredCLIRoutePlanner:
@@ -470,12 +500,16 @@ class RefactoredCLIRoutePlanner:
         directions_output = route_formatter.format_directions_cli(directions)
         print(directions_output)
     
-    def create_route_visualization(self, route_result, save_file=None):
-        """Create route visualization
+    def create_route_visualization(self, route_result, start_node, target_distance):
+        """Create route visualization and automatically save to output directory
         
         Args:
             route_result: Route result from optimizer
-            save_file: Optional file to save visualization
+            start_node: Starting node ID
+            target_distance: Target distance in km
+            
+        Returns:
+            str: Path to saved visualization file
         """
         if not self.services or not route_result:
             return
@@ -653,11 +687,13 @@ class RefactoredCLIRoutePlanner:
                 
                 plt.tight_layout()
                 
-                if save_file:
-                    plt.savefig(save_file, dpi=150, bbox_inches='tight')
-                    print(f"   ✅ Saved visualization to: {save_file}")
+                # Generate timestamped filename and save
+                save_file = get_timestamped_filename("route_elevation", start_node, target_distance, ".png")
+                plt.savefig(save_file, dpi=150, bbox_inches='tight')
+                print(f"   ✅ Saved elevation profile to: {save_file}")
                 
-                plt.show()
+                plt.close()  # Close instead of show to avoid blocking
+                return save_file
                 
             except ImportError:
                 print("⚠️ Matplotlib not available, cannot create visualization")
@@ -668,12 +704,15 @@ class RefactoredCLIRoutePlanner:
             print(f"❌ Profile generation failed: {e}")
     
     def export_route_for_mapping(self, route_result, start_node, target_distance):
-        """Export route with detailed path for mapping applications
+        """Export route with detailed path for mapping applications to output directory
         
         Args:
             route_result: Route result from optimizer
             start_node: Starting node ID
             target_distance: Target distance in km
+            
+        Returns:
+            tuple: (geojson_file_path, gpx_file_path)
         """
         if not self.services or not route_result:
             return
@@ -699,37 +738,42 @@ class RefactoredCLIRoutePlanner:
             print(f"   - {intersections} intersections")
             print(f"   - {geometry_nodes} geometry nodes")
             
-            # Export GeoJSON
-            geojson_file = f"route_{start_node}_{target_distance}km.geojson"
+            # Export GeoJSON with timestamp
+            geojson_file = get_timestamped_filename("route_map", start_node, target_distance, ".geojson")
             geojson_data = route_formatter.export_route_geojson(route_result, detailed_path)
             
             with open(geojson_file, 'w') as f:
                 f.write(geojson_data)
             print(f"   ✅ Saved GeoJSON: {geojson_file}")
             
-            # Export GPX
-            gpx_file = f"route_{start_node}_{target_distance}km.gpx"
+            # Export GPX with timestamp
+            gpx_file = get_timestamped_filename("route_gps", start_node, target_distance, ".gpx")
             gpx_data = route_formatter.export_route_gpx(route_result, detailed_path)
             
             with open(gpx_file, 'w') as f:
                 f.write(gpx_data)
             print(f"   ✅ Saved GPX: {gpx_file}")
             
-            print(f"\n📍 Map visualization files created:")
-            print(f"   • {geojson_file} - Import into web mapping tools (Leaflet, Mapbox, etc.)")
-            print(f"   • {gpx_file} - Import into GPS devices or apps like Strava/Garmin")
+            print(f"\n📍 Map files saved to output directory:")
+            print(f"   • {os.path.basename(geojson_file)} - Import into web mapping tools (Leaflet, Mapbox, etc.)")
+            print(f"   • {os.path.basename(gpx_file)} - Import into GPS devices or apps like Strava/Garmin")
             print(f"   These files follow the actual road paths, not straight lines!")
+            
+            return geojson_file, gpx_file
             
         except Exception as e:
             print(f"❌ Route export failed: {e}")
     
     def create_route_map_png(self, route_result, start_node, target_distance):
-        """Create static PNG map with route overlay
+        """Create static PNG map with route overlay and save to output directory
         
         Args:
             route_result: Route result from optimizer
             start_node: Starting node ID  
             target_distance: Target distance in km
+            
+        Returns:
+            str: Path to saved map file
         """
         if not self.services or not route_result:
             return
@@ -897,8 +941,8 @@ Key Waypoints: {len(original_route)}"""
             
             plt.tight_layout()
             
-            # Save map
-            map_file = f"route_{start_node}_{target_distance}km_map.png"
+            # Save map with timestamp
+            map_file = get_timestamped_filename("route_map", start_node, target_distance, ".png")
             plt.savefig(map_file, dpi=300, bbox_inches='tight')
             plt.close()
             
@@ -911,6 +955,8 @@ Key Waypoints: {len(original_route)}"""
             print(f"   - Route statistics and elevation range")
             if use_osm:
                 print(f"   - OpenStreetMap background with streets, buildings, and labels")
+            
+            return map_file
             
         except ImportError as e:
             print(f"⚠️ Missing dependencies for map creation: {e}")
@@ -974,34 +1020,9 @@ def interactive_mode():
                         start_node = planner.selected_start_node
                         print(f"✅ Using selected starting point: Node {start_node}")
                     else:
-                        # Show current dynamic default, but allow user to choose
-                        network_manager = planner.services['network_manager']
-                        graph = planner.services['graph']
-                        current_default = network_manager.get_start_node(graph)
-                        
-                        use_default = input(f"\nUse dynamic default starting point (Node {current_default})? (y/n): ").strip().lower()
-                        if use_default == 'y' or use_default == '':
-                            start_node = None  # Triggers dynamic lookup after network expansion
-                            print(f"✅ Using dynamic default starting point")
-                        else:
-                            available_nodes = planner.list_starting_points(10)
-                            start_input = input("\nEnter starting node (option number or node ID): ").strip()
-                            
-                            try:
-                                input_num = int(start_input)
-                                if 1 <= input_num <= len(available_nodes):
-                                    start_node = available_nodes[input_num - 1]
-                                else:
-                                    start_node = input_num
-                            except ValueError:
-                                print("❌ Invalid input")
-                                continue
-                            
-                            # Validate node
-                            network_manager = planner.services['network_manager']
-                            if not network_manager.validate_node_exists(planner.services['graph'], start_node):
-                                print(f"❌ Invalid node: {start_node}")
-                                continue
+                        # Automatically use dynamic default starting point
+                        start_node = None  # Triggers dynamic lookup after network expansion
+                        print(f"✅ Using dynamic default starting point")
                     
                     # Get target distance
                     distance_input = input("Enter target distance (km) [5.0]: ").strip()
@@ -1032,38 +1053,14 @@ def interactive_mode():
                     except ValueError:
                         objective = obj_list[1][1]  # Default to Maximum Elevation Gain
                     
-                    # Get algorithm
-                    print("\nAlgorithm options:")
+                    # Get algorithm - automatically use genetic since it's the only option
                     available_algorithms = route_optimizer.get_available_algorithms()
-                    algo_options = []
-                    
-                    # Build algorithm menu based on availability
-                    option_num = 1
-                    algo_map = {}
-                    
-                    
-                    
                     if "genetic" in available_algorithms:
-                        print(f"{option_num}. genetic (genetic algorithm)")
-                        algo_map[option_num] = "genetic"
-                        algo_options.append("genetic")
-                        option_num += 1
-                    
-                    
-                    # Find genetic algorithm option number for default
-                    genetic_option = None
-                    for option_num, algo in algo_map.items():
-                        if algo == "genetic":
-                            genetic_option = option_num
-                            break
-                    
-                    default_option = genetic_option if genetic_option else 1
-                    algo_input = input(f"Select algorithm (1-{len(algo_map)}) [{default_option}]: ").strip()
-                    try:
-                        algo_choice = int(algo_input) if algo_input else default_option
-                        algorithm = algo_map.get(algo_choice, "genetic")
-                    except ValueError:
                         algorithm = "genetic"
+                        print(f"✅ Using genetic algorithm (only option available)")
+                    else:
+                        algorithm = "genetic"  # Default fallback
+                        print(f"⚠️ Using default genetic algorithm")
                     
                     # Ask about footway inclusion
                     footway_input = input("\nInclude footways/sidewalks? (can cause redundant back-and-forth routes) (y/n) [n]: ").strip().lower()
@@ -1088,25 +1085,37 @@ def interactive_mode():
                     if result:
                         planner.display_route_stats(result)
                         
-                        # Ask for directions
-                        directions_input = input("\nShow turn-by-turn directions? (y/n): ").strip().lower()
-                        if directions_input in ['y', 'yes']:
-                            planner.generate_directions(result)
+                        # Automatically generate directions
+                        print("\n📋 Generating turn-by-turn directions...")
+                        planner.generate_directions(result)
                         
-                        # Ask for visualizations
-                        viz_input = input("\nCreate route visualizations? (y/n): ").strip().lower()
-                        if viz_input in ['y', 'yes']:
-                            # Elevation profile
-                            elevation_file = f"route_{start_node}_{target_distance}km_elevation.png"
-                            planner.create_route_visualization(result, elevation_file)
-                            
-                            # Route map
-                            planner.create_route_map_png(result, start_node, target_distance)
-                            
-                            # Ask for file exports
-                            export_input = input("\nExport route files (GeoJSON/GPX)? (y/n): ").strip().lower()
-                            if export_input in ['y', 'yes']:
-                                planner.export_route_for_mapping(result, start_node, target_distance)
+                        # Automatically create all visualizations and export files
+                        print("\n📊 Creating route visualizations and exporting files...")
+                        
+                        # Determine actual start node for file naming
+                        actual_start_node = result.get('start_node', start_node)
+                        if actual_start_node is None:
+                            actual_start_node = 'default'
+                        
+                        # Elevation profile
+                        elevation_file = planner.create_route_visualization(result, actual_start_node, target_distance)
+                        
+                        # Route map
+                        map_file = planner.create_route_map_png(result, actual_start_node, target_distance)
+                        
+                        # Export route files
+                        geojson_file, gpx_file = planner.export_route_for_mapping(result, actual_start_node, target_distance)
+                        
+                        # Summary of generated files
+                        print(f"\n📂 All files saved to output directory:")
+                        if elevation_file:
+                            print(f"   • {os.path.basename(elevation_file)} - Elevation profile")
+                        if map_file:
+                            print(f"   • {os.path.basename(map_file)} - Route map")
+                        if geojson_file:
+                            print(f"   • {os.path.basename(geojson_file)} - Web mapping format")
+                        if gpx_file:
+                            print(f"   • {os.path.basename(gpx_file)} - GPS device format")
                 
                 except KeyboardInterrupt:
                     print("\n⏹️ Operation cancelled")
@@ -1281,6 +1290,30 @@ choices=['genetic'],
         if result:
             planner.display_route_stats(result)
             planner.generate_directions(result)
+            
+            # Automatically create all visualizations and export files for command line mode
+            print("\n📊 Creating route visualizations and exporting files...")
+            
+            # Determine actual start node for file naming
+            actual_start_node = result.get('start_node', start_node)
+            if actual_start_node is None:
+                actual_start_node = 'default'
+            
+            # Create all files
+            elevation_file = planner.create_route_visualization(result, actual_start_node, args.distance)
+            map_file = planner.create_route_map_png(result, actual_start_node, args.distance)
+            geojson_file, gpx_file = planner.export_route_for_mapping(result, actual_start_node, args.distance)
+            
+            # Summary of generated files
+            print(f"\n📂 All files saved to output directory:")
+            if elevation_file:
+                print(f"   • {os.path.basename(elevation_file)} - Elevation profile")
+            if map_file:
+                print(f"   • {os.path.basename(map_file)} - Route map")
+            if geojson_file:
+                print(f"   • {os.path.basename(geojson_file)} - Web mapping format")
+            if gpx_file:
+                print(f"   • {os.path.basename(gpx_file)} - GPS device format")
 
 
 if __name__ == "__main__":

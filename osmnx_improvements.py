@@ -149,7 +149,7 @@ class AdvancedOSMnxManager:
         elif elevation_source == 'srtm':
             graph = ox.elevation.add_node_elevations_raster(
                 graph,
-                filepath='srtm_20_05.tif'
+                filepath='elevation_data/srtm_90m/srtm_20_05.tif'
             )
         
         # Add edge grades

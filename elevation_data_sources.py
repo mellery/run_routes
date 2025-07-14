@@ -836,7 +836,7 @@ class ElevationConfig:
         self.auto_rebuild_index = True
         
         # SRTM settings
-        self.srtm_file_path = "srtm_20_05.tif"  # Use available SRTM file
+        self.srtm_file_path = "elevation_data/srtm_90m/srtm_20_05.tif"  # Use available SRTM file
         
         # Performance settings
         self.max_open_files = 10

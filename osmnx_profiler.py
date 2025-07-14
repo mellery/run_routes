@@ -249,7 +249,7 @@ class ProfiledNetworkManager:
     def add_elevation_data(self, graph):
         """Profiled elevation processing"""
         import osmnx as ox
-        return ox.elevation.add_node_elevations_raster(graph, 'srtm_20_05.tif')
+        return ox.elevation.add_node_elevations_raster(graph, 'elevation_data/srtm_90m/srtm_20_05.tif')
     
     @profile_caching
     def save_to_cache(self, graph, cache_path):

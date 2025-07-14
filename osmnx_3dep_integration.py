@@ -195,7 +195,7 @@ class OSMnx3DEPIntegration:
             
     def add_elevation_hybrid_osmnx(self,
                                   graph: nx.Graph,
-                                  fallback_raster: str = "srtm_20_05.tif",
+                                  fallback_raster: str = "elevation_data/srtm_90m/srtm_20_05.tif",
                                   min_coverage: float = 0.9) -> nx.Graph:
         """Hybrid approach: OSMnx for 3DEP coverage, fallback for gaps
         
@@ -242,7 +242,7 @@ class OSMnx3DEPIntegration:
     
     def compare_elevation_methods(self, 
                                  graph: nx.Graph,
-                                 fallback_raster: str = "srtm_20_05.tif") -> dict:
+                                 fallback_raster: str = "elevation_data/srtm_90m/srtm_20_05.tif") -> dict:
         """Compare current vs OSMnx elevation methods
         
         Args:

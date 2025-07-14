@@ -223,7 +223,7 @@ def has_elevation_data(graph):
     
     return True
 
-def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif'):
+def add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif'):
     """Add high-resolution elevation data to graph nodes using 3DEP when available
     
     Args:
@@ -431,7 +431,7 @@ def main():
         
         # Fallback to original method
         place = 'Christiansburg, Virginia, USA'
-        srtm_file = 'srtm_20_05.tif'
+        srtm_file = 'elevation_data/srtm_90m/srtm_20_05.tif'
 
         # Get street data
         print("Downloading street data...")

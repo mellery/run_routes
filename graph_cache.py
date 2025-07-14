@@ -75,9 +75,9 @@ def load_or_generate_graph(center_point=(37.1299, -80.4094), radius_m=1200, netw
             
             graph = ox.graph_from_point(center_point, dist=radius_m, network_type=network_type)
             if use_enhanced_elevation:
-                graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif')
+                graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif')
             else:
-                graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
+                graph = add_elevation_to_graph(graph, 'elevation_data/srtm_90m/srtm_20_05.tif')
             graph = add_elevation_to_edges(graph)
             graph = add_running_weights(graph)
             

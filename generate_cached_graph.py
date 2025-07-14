@@ -70,12 +70,12 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         if use_osmnx_elevation:
             # New OSMnx + 3DEP integration method (recommended)
             print("   Using OSMnx + 3DEP integration for enhanced accuracy...")
-            graph = add_elevation_hybrid_osmnx(graph, fallback_raster='srtm_20_05.tif')
+            graph = add_elevation_hybrid_osmnx(graph, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif')
             
         elif use_enhanced_elevation:
             # Legacy enhanced elevation method
             print("   Using legacy enhanced elevation method...")
-            graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='srtm_20_05.tif')
+            graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif')
             
             # Add edge grades manually (OSMnx method includes this)
             print("\n3️⃣ Calculating elevation gain/loss for edges...")
@@ -84,7 +84,7 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         else:
             # Basic SRTM-only method
             print("   Using basic SRTM elevation method...")
-            graph = add_elevation_to_graph(graph, 'srtm_20_05.tif')
+            graph = add_elevation_to_graph(graph, 'elevation_data/srtm_90m/srtm_20_05.tif')
             
             # Add edge grades manually
             print("\n3️⃣ Calculating elevation gain/loss for edges...")
