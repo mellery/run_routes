@@ -79,6 +79,7 @@ class RefactoredCLIRoutePlanner:
         self.elevation_manager = None
         self.preferred_elevation_source = None
         self.verbose = False  # Debug output flag
+        self.output_dir = ensure_output_directory()  # Set output directory
         
     def initialize_services(self, center_point=None, radius_km=5.0):
         """Initialize all route services
@@ -501,7 +502,7 @@ class RefactoredCLIRoutePlanner:
         print(directions_output)
     
     def create_route_visualization(self, route_result, start_node, target_distance):
-        """Create route visualization and automatically save to output directory
+        """Create route visualization with modern terrain profile
         
         Args:
             route_result: Route result from optimizer
@@ -519,12 +520,12 @@ class RefactoredCLIRoutePlanner:
         print(f"\n📈 Creating route visualization...")
         
         try:
-            # Generate high-resolution elevation profile data
+            # Generate elevation profile data
             if ENHANCED_ELEVATION_AVAILABLE:
-                # Enhanced profiler supports interpolate_points parameter - enable for better resolution
+                # Enhanced profiler supports interpolate_points parameter
                 profile_data = elevation_profiler.generate_profile_data(route_result, interpolate_points=True)
             else:
-                # Original profiler doesn't support interpolate_points parameter
+                # Original profiler
                 profile_data = elevation_profiler.generate_profile_data(route_result)
             
             if not profile_data:
@@ -534,174 +535,39 @@ class RefactoredCLIRoutePlanner:
             print(f"   Route has {len(route_result['route'])} nodes")
             print(f"   Total distance: {profile_data.get('total_distance_km', 0):.2f}km")
             
-            # Create matplotlib visualization (simplified version)
-            try:
-                import matplotlib.pyplot as plt
-                
-                # Debug: Check array lengths before unpacking
-                if self.verbose:
-                    print(f"   Debug - Profile data keys: {list(profile_data.keys())}")
-                    print(f"   Debug - Elevations length: {len(profile_data.get('elevations', []))}")
-                    print(f"   Debug - Distances_km length: {len(profile_data.get('distances_km', []))}")
-                    print(f"   Debug - Coordinates length: {len(profile_data.get('coordinates', []))}")
-                
-                elevations = profile_data.get('elevations', [])
-                distances_km = profile_data.get('distances_km', [])
-                coordinates = profile_data.get('coordinates', [])
-                
-                # Enhance resolution with 3DEP data for more detailed terrain profile
-                if ENHANCED_ELEVATION_AVAILABLE and len(coordinates) > 2:
-                    try:
-                        print("   🔍 Enhancing resolution with 3DEP data...")
-                        
-                        # Get 3DEP elevation source for high-resolution lookups
-                        threep_elevation_source = None
-                        try:
-                            from elevation_data_sources import get_elevation_manager
-                            elevation_manager = get_elevation_manager()
-                            threep_elevation_source = elevation_manager.get_elevation_source()
-                        except:
-                            pass
-                        
-                        if threep_elevation_source is not None:
-                            # Create detailed points every 5 meters for better resolution
-                            detailed_coords = []
-                            detailed_elevs = []
-                            detailed_dists = []
-                            
-                            target_spacing_km = 0.005  # 5 meters in km
-                            
-                            for i in range(len(coordinates) - 1):
-                                # Add current point
-                                detailed_coords.append(coordinates[i])
-                                detailed_elevs.append(elevations[i])
-                                detailed_dists.append(distances_km[i])
-                                
-                                # Calculate segment distance
-                                segment_distance_km = distances_km[i + 1] - distances_km[i]
-                                
-                                # Add interpolated points if segment is long enough
-                                if segment_distance_km > target_spacing_km:
-                                    num_points = int(segment_distance_km / target_spacing_km)
-                                    
-                                    curr_lat = coordinates[i]['latitude']
-                                    curr_lon = coordinates[i]['longitude']
-                                    next_lat = coordinates[i + 1]['latitude']
-                                    next_lon = coordinates[i + 1]['longitude']
-                                    
-                                    for j in range(1, num_points):
-                                        ratio = j / num_points
-                                        
-                                        # Linear interpolation of coordinates
-                                        interp_lat = curr_lat + (next_lat - curr_lat) * ratio
-                                        interp_lon = curr_lon + (next_lon - curr_lon) * ratio
-                                        interp_dist_km = distances_km[i] + segment_distance_km * ratio
-                                        
-                                        # Get elevation from 3DEP data
-                                        try:
-                                            threep_elevation = threep_elevation_source.get_elevation(interp_lat, interp_lon)
-                                            if threep_elevation is not None:
-                                                best_elevation = threep_elevation
-                                            else:
-                                                best_elevation = elevations[i] + (elevations[i + 1] - elevations[i]) * ratio
-                                        except:
-                                            best_elevation = elevations[i] + (elevations[i + 1] - elevations[i]) * ratio
-                                        
-                                        detailed_coords.append({
-                                            'latitude': interp_lat,
-                                            'longitude': interp_lon,
-                                            'node_id': f'enhanced_{i}_{j}'
-                                        })
-                                        detailed_elevs.append(best_elevation)
-                                        detailed_dists.append(interp_dist_km)
-                            
-                            # Add final point
-                            detailed_coords.append(coordinates[-1])
-                            detailed_elevs.append(elevations[-1])
-                            detailed_dists.append(distances_km[-1])
-                            
-                            # Use enhanced data
-                            original_points = len(coordinates)
-                            coordinates = detailed_coords
-                            elevations = detailed_elevs
-                            distances_km = detailed_dists
-                            
-                            print(f"   ✅ Enhanced resolution: {original_points} → {len(coordinates)} points")
-                            print(f"   📏 Average spacing: {(distances_km[-1] * 1000 / len(coordinates)):.1f}m")
-                        
-                    except Exception as e:
-                        print(f"   ⚠️ Resolution enhancement failed: {e}, using standard data")
-                
-                # Validate that all required arrays exist and have data
-                if not elevations or not distances_km or not coordinates:
-                    print("❌ Missing elevation profile data arrays")
-                    print(f"   elevations: {len(elevations)}, distances_km: {len(distances_km)}, coordinates: {len(coordinates)}")
-                    return
-                
-                # Ensure all arrays have the same length
-                min_length = min(len(elevations), len(distances_km), len(coordinates))
-                if min_length == 0:
-                    print("❌ No elevation data available for visualization")
-                    return
-                
-                if min_length < len(elevations) or min_length < len(distances_km) or min_length < len(coordinates):
-                    print(f"⚠️ Array length mismatch - truncating to {min_length} points")
-                
-                # Truncate arrays to same length if needed
-                elevations = elevations[:min_length]
-                distances_km = distances_km[:min_length]
-                coordinates = coordinates[:min_length]
-                
-                # Create figure with elevation profile
-                fig, ax = plt.subplots(1, 1, figsize=(12, 6))
-                
-                # Elevation profile with improved Y-axis scaling and enhanced styling
-                ax.plot(distances_km, elevations, 'b-', linewidth=2)
-                ax.fill_between(distances_km, elevations, alpha=0.3, color='lightblue')
-                ax.set_xlabel('Distance (km)')
-                ax.set_ylabel('Elevation (m)')
-                ax.set_title(f'High-Resolution Elevation Profile - {profile_data.get("total_distance_km", 0):.2f}km Route\n(Using 3DEP 1-meter Precision Data)')
-                ax.grid(True, alpha=0.3)
-                
-                # Set Y-axis to start from lowest elevation with some padding
-                if elevations:
-                    min_elev = min(elevations)
-                    max_elev = max(elevations)
-                    elev_range = max_elev - min_elev
-                    padding = max(2, elev_range * 0.1)  # 10% padding or 2m minimum
-                    ax.set_ylim(min_elev - padding, max_elev + padding)
-                    
-                    # Add elevation statistics
-                    elevation_gain = sum(max(0, elevations[i] - elevations[i-1]) for i in range(1, len(elevations)))
-                    elevation_loss = sum(max(0, elevations[i-1] - elevations[i]) for i in range(1, len(elevations)))
-                    
-                    stats_text = f"""Elevation Statistics:
-• Points: {len(elevations)} samples
-• Min: {min_elev:.1f}m  Max: {max_elev:.1f}m
-• Climb: {elevation_gain:.1f}m  Descent: {elevation_loss:.1f}m
-• Net: {elevations[-1] - elevations[0]:+.1f}m"""
-                    
-                    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
-                           verticalalignment='top', fontsize=9, 
-                           bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
-                
-                plt.tight_layout()
-                
-                # Generate timestamped filename and save
-                save_file = get_timestamped_filename("route_elevation", start_node, target_distance, ".png")
-                plt.savefig(save_file, dpi=150, bbox_inches='tight')
-                print(f"   ✅ Saved elevation profile to: {save_file}")
-                
-                plt.close()  # Close instead of show to avoid blocking
-                return save_file
-                
-            except ImportError:
-                print("⚠️ Matplotlib not available, cannot create visualization")
-            except Exception as viz_error:
-                print(f"❌ Visualization failed: {viz_error}")
+            # Use terrain profile plotter (no fallback - we have 3DEP data and should always work)
+            from terrain_profile_plotter import TerrainProfilePlotter
+            
+            plotter = TerrainProfilePlotter(output_dir=self.output_dir)
+            
+            # Generate custom title
+            algorithm = route_result.get('algorithm', 'Unknown')
+            objective = route_result.get('objective', 'Unknown')
+            title = f'Terrain Profile - {algorithm.upper()} Algorithm ({objective.title()} Objective)'
+            
+            # Generate timestamped filename (just the filename, not full path)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_filename = f"terrain_profile_{start_node}_{target_distance}km_{timestamp}.png"
+            
+            # Create the plot with full features
+            output_path = plotter.plot_terrain_profile(
+                route_result=route_result,
+                profile_data=profile_data,
+                title=title,
+                save_filename=save_filename,
+                show_waypoints=True,
+                show_climb_analysis=True,
+                enhanced_resolution=True
+            )
+            
+            print(f"   ✅ Saved terrain profile to: {output_path}")
+            return output_path
                 
         except Exception as e:
             print(f"❌ Profile generation failed: {e}")
+            if self.verbose:
+                import traceback
+                traceback.print_exc()
     
     def export_route_for_mapping(self, route_result, start_node, target_distance):
         """Export route with detailed path for mapping applications to output directory

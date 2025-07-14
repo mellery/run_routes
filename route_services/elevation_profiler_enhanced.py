@@ -473,20 +473,23 @@ class EnhancedElevationProfiler:
             for i in range(len(path) - 1):
                 # Handle both directed and undirected graphs
                 try:
-                    edge_data = self.graph.edges[path[i], path[i + 1]]
-                except KeyError:
-                    # Try getting edge data with 0 key for multigraphs
-                    try:
-                        edge_data = self.graph[path[i]][path[i + 1]]
-                        if isinstance(edge_data, dict):
-                            # For multigraphs, get first edge
-                            if edge_data:
-                                edge_data = list(edge_data.values())[0]
-                    except (KeyError, IndexError):
-                        # Fallback: use 0 length
-                        edge_data = {'length': 0}
-                
-                total_distance += edge_data.get('length', 0)
+                    # Handle MultiDiGraph edge access properly
+                    edge_view = self.graph[path[i]][path[i + 1]]
+                    
+                    # For MultiDiGraph, edge_view is an AtlasView containing edge keys
+                    if hasattr(edge_view, 'keys') and list(edge_view.keys()):
+                        # Get the first edge (there may be multiple parallel edges)
+                        first_edge_key = list(edge_view.keys())[0]
+                        edge_data = edge_view[first_edge_key]
+                        edge_length = edge_data.get('length', 0)
+                        total_distance += edge_length
+                    else:
+                        # No edges found
+                        total_distance += 0
+                        
+                except (KeyError, IndexError, AttributeError):
+                    # Fallback: use 0 length
+                    total_distance += 0
             
             # Cache result
             self._distance_cache[cache_key] = total_distance

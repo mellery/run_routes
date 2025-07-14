@@ -75,6 +75,8 @@ class ElevationProfiler:
             cumulative_distance += return_dist
             distances.append(cumulative_distance)
             elevations.append(elevations[0])  # Back to start elevation
+            # Add coordinate for return point (same as start)
+            coordinates.append(coordinates[0])
         
         # Convert distances to kilometers
         distances_km = [d / 1000 for d in distances]
