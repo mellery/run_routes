@@ -20,10 +20,14 @@ logger = logging.getLogger(__name__)
 from .chromosome import RouteChromosome
 from .population import PopulationInitializer
 from .distance_compliant_population import DistanceCompliantPopulationInitializer
+from .terrain_aware_initialization import TerrainAwarePopulationInitializer, TerrainAwareConfig
 from .operators import GAOperators
 from .constraint_preserving_operators import ConstraintPreservingOperators, RouteConstraints
 from .fitness import GAFitnessEvaluator, FitnessObjective
 from .performance import GASegmentCache
+from .adaptive_mutation import AdaptiveMutationController, AdaptiveMutationConfig
+from .restart_mechanisms import RestartMechanisms, RestartConfig
+from .diversity_selection import DiversityPreservingSelector, DiversitySelectionConfig
 
 # Enhanced 1m precision components (removed ga_precision_fitness - now integrated into ga_fitness)
 try:
@@ -64,6 +68,36 @@ class GAConfig:
     elevation_bias_strength: float = 0.5
     generate_precision_visualizations: bool = False
     precision_comparison_interval: int = 25  # Generate comparison every N generations
+    
+    # Adaptive mutation settings
+    enable_adaptive_mutation: bool = True  # Enable adaptive mutation rates
+    adaptive_mutation_min_rate: float = 0.05  # Minimum mutation rate
+    adaptive_mutation_max_rate: float = 0.50  # Maximum mutation rate
+    adaptive_mutation_stagnation_threshold: int = 10  # Generations before considering stagnation
+    adaptive_mutation_diversity_threshold: float = 0.3  # Diversity threshold for boosting
+    
+    # Terrain-aware initialization settings
+    enable_terrain_aware_initialization: bool = True  # Enable terrain-aware population initialization
+    terrain_elevation_gain_threshold: float = 30.0  # Minimum elevation gain for "high" nodes
+    terrain_max_elevation_gain_threshold: float = 100.0  # Maximum elevation gain for "very high" nodes
+    terrain_high_elevation_percentage: float = 0.4  # Percentage targeting high elevation
+    terrain_very_high_elevation_percentage: float = 0.2  # Percentage targeting very high elevation
+    
+    # Restart mechanisms settings
+    enable_restart_mechanisms: bool = True  # Enable restart mechanisms for escaping local optima
+    restart_convergence_threshold: float = 0.01  # Fitness improvement threshold for convergence
+    restart_stagnation_generations: int = 15  # Generations without improvement before restart
+    restart_diversity_threshold: float = 0.2  # Minimum population diversity before restart
+    restart_elite_retention_percentage: float = 0.2  # Percentage of elite to retain during restart
+    restart_max_restarts: int = 2  # Maximum number of restarts per optimization
+    
+    # Diversity-preserving selection settings
+    enable_diversity_selection: bool = True  # Enable diversity-preserving selection
+    diversity_threshold: float = 0.3  # Minimum diversity between selected individuals
+    diversity_weight: float = 0.3  # Weight of diversity in selection decisions
+    diversity_fitness_weight: float = 0.7  # Weight of fitness in selection decisions
+    diversity_elite_percentage: float = 0.1  # Percentage of best individuals to always select
+    diversity_adaptive_threshold: bool = True  # Whether to adapt diversity threshold dynamically
 
 
 @dataclass
@@ -84,6 +118,10 @@ class GAResults:
     micro_terrain_features: Optional[Dict[str, Any]] = None
     precision_visualizations: Optional[List[str]] = None
     elevation_profile_comparison: Optional[Dict[str, Any]] = None
+    
+    # Restart and diversity results
+    restart_stats: Optional[Dict[str, Any]] = None
+    diversity_stats: Optional[Dict[str, Any]] = None
 
 
 class GeneticRouteOptimizer:
@@ -128,6 +166,35 @@ class GeneticRouteOptimizer:
             self.precision_mutation = None
             self.precision_visualizer = None
             self.precision_visualizations = []
+        
+        # Initialize adaptive mutation controller
+        if self.config.enable_adaptive_mutation:
+            adaptive_config = AdaptiveMutationConfig(
+                base_mutation_rate=self.config.mutation_rate,
+                min_mutation_rate=self.config.adaptive_mutation_min_rate,
+                max_mutation_rate=self.config.adaptive_mutation_max_rate,
+                stagnation_threshold=self.config.adaptive_mutation_stagnation_threshold,
+                diversity_threshold=self.config.adaptive_mutation_diversity_threshold
+            )
+            self.adaptive_mutation_controller = AdaptiveMutationController(adaptive_config)
+        else:
+            self.adaptive_mutation_controller = None
+        
+        # Initialize restart mechanisms (will be set up in _setup_optimization)
+        self.restart_mechanisms = None
+        
+        # Initialize diversity-preserving selector
+        if self.config.enable_diversity_selection:
+            diversity_config = DiversitySelectionConfig(
+                diversity_threshold=self.config.diversity_threshold,
+                diversity_weight=self.config.diversity_weight,
+                fitness_weight=self.config.diversity_fitness_weight,
+                elite_percentage=self.config.diversity_elite_percentage,
+                adaptive_threshold=self.config.diversity_adaptive_threshold
+            )
+            self.diversity_selector = DiversityPreservingSelector(diversity_config)
+        else:
+            self.diversity_selector = None
         
         # Evolution tracking
         self.generation = 0
@@ -249,6 +316,25 @@ class GeneticRouteOptimizer:
                       f"Avg={avg_fitness:.4f}, Dist={best_distance:.2f}km, "
                       f"Elev={best_elevation:.0f}m, Time={gen_time:.2f}s")
             
+            # Check for restart needed
+            if self.restart_mechanisms and self.restart_mechanisms.check_restart_needed(generation, population, fitness_scores):
+                population, restart_info = self.restart_mechanisms.execute_restart(population, fitness_scores, generation)
+                
+                # Re-evaluate population after restart
+                fitness_scores = self._evaluate_population_with_precision(population, objective, distance_km)
+                
+                # Update best if restart found better solution
+                current_best_idx = fitness_scores.index(max(fitness_scores))
+                current_best_fitness = fitness_scores[current_best_idx]
+                
+                if current_best_fitness > self.best_fitness:
+                    self.best_chromosome = population[current_best_idx].copy()
+                    self.best_fitness = current_best_fitness
+                    self.best_generation = generation
+                
+                if self.config.verbose:
+                    print(f"   🔄 Restart completed: new best fitness = {self.best_fitness:.4f}")
+            
             # Generation callback
             if self.generation_callback:
                 self.generation_callback(generation, population, fitness_scores)
@@ -313,6 +399,13 @@ class GeneticRouteOptimizer:
                 except Exception as e:
                     logger.warning(f"Failed to generate final precision visualization: {e}")
         
+        # Add restart and diversity statistics
+        if self.restart_mechanisms:
+            results.restart_stats = self.restart_mechanisms.get_restart_stats()
+        
+        if self.diversity_selector:
+            results.diversity_stats = self.diversity_selector.get_diversity_stats()
+        
         if self.config.verbose:
             print(f"🏁 Optimization completed:")
             print(f"   Best fitness: {self.best_fitness:.4f}")
@@ -327,6 +420,24 @@ class GeneticRouteOptimizer:
                 print(f"   Cache hits: {cache_info['cache_hits']:,} / {cache_info['total_requests']:,} ({cache_info['hit_rate_percent']:.1f}%)")
                 print(f"   Time saved: {cache_info.get('total_time_saved_seconds', 0):.2f}s")
                 print(f"   Segments cached: {cache_info['cache_size']:,}")
+            
+            # Report restart mechanisms performance
+            if self.restart_mechanisms:
+                restart_stats = self.restart_mechanisms.get_restart_stats()
+                print(f"🔄 Restart Mechanisms:")
+                print(f"   Restarts executed: {restart_stats['restart_count']}/{restart_stats['max_restarts']}")
+                if restart_stats['restart_count'] > 0:
+                    conv_stats = restart_stats['convergence_stats']
+                    print(f"   Final stagnation: {conv_stats['stagnation_count']} generations")
+                    print(f"   Final diversity: {conv_stats['recent_diversity']:.3f}")
+            
+            # Report diversity selection performance
+            if self.diversity_selector:
+                diversity_stats = self.diversity_selector.get_diversity_stats()
+                print(f"🎯 Diversity Selection:")
+                print(f"   Current diversity: {diversity_stats['current_avg_diversity']:.3f}")
+                print(f"   Diversity trend: {diversity_stats['diversity_trend']:.4f}")
+                print(f"   Diversity stability: {diversity_stats['diversity_stability']:.3f}")
             
             # Report precision benefits if available
             if (self.precision_components_enabled and results.precision_benefits):
@@ -343,8 +454,24 @@ class GeneticRouteOptimizer:
     
     def _setup_optimization(self, start_node: int, distance_km: float, objective: str):
         """Setup optimization components"""
-        # Initialize population initializer (choose between old and new)
-        if self.config.use_distance_compliant_initialization:
+        # Initialize population initializer (choose between terrain-aware, distance-compliant, and traditional)
+        if self.config.enable_terrain_aware_initialization:
+            if self.config.verbose:
+                print("🏔️  Using terrain-aware population initialization")
+            
+            # Create terrain-aware config
+            terrain_config = TerrainAwareConfig(
+                elevation_gain_threshold=self.config.terrain_elevation_gain_threshold,
+                max_elevation_gain_threshold=self.config.terrain_max_elevation_gain_threshold,
+                high_elevation_percentage=self.config.terrain_high_elevation_percentage,
+                very_high_elevation_percentage=self.config.terrain_very_high_elevation_percentage
+            )
+            
+            self.population_initializer = TerrainAwarePopulationInitializer(
+                self.graph, start_node, distance_km, terrain_config
+            )
+            
+        elif self.config.use_distance_compliant_initialization:
             if self.config.verbose:
                 print("🎯 Using distance-compliant population initialization")
             self.population_initializer = DistanceCompliantPopulationInitializer(self.graph, start_node, distance_km * 1.2)  # 20% buffer
@@ -375,6 +502,19 @@ class GeneticRouteOptimizer:
             )
             
             self.constraint_operators = ConstraintPreservingOperators(self.graph, constraints)
+        
+        # Initialize restart mechanisms
+        if self.config.enable_restart_mechanisms:
+            restart_config = RestartConfig(
+                convergence_threshold=self.config.restart_convergence_threshold,
+                stagnation_generations=self.config.restart_stagnation_generations,
+                diversity_threshold=self.config.restart_diversity_threshold,
+                elite_retention_percentage=self.config.restart_elite_retention_percentage,
+                max_restarts=self.config.restart_max_restarts
+            )
+            self.restart_mechanisms = RestartMechanisms(
+                self.graph, start_node, distance_km, restart_config
+            )
         else:
             if self.config.verbose:
                 print("⚙️ Using standard genetic operators")
@@ -388,6 +528,12 @@ class GeneticRouteOptimizer:
         self.best_fitness = 0.0
         self.best_generation = 0
         self.evaluation_times = []
+        
+        # Reset adaptive mutation controller
+        if self.adaptive_mutation_controller:
+            self.adaptive_mutation_controller.reset()
+            if self.config.verbose:
+                print("🧬 Adaptive mutation controller initialized")
     
     def _adapt_configuration(self, distance_km: float):
         """Adapt GA configuration based on problem size"""
@@ -452,6 +598,22 @@ class GeneticRouteOptimizer:
         """Evolve population for one generation"""
         new_population = []
         
+        # Update adaptive mutation rate if enabled
+        current_mutation_rate = self.config.mutation_rate
+        if self.adaptive_mutation_controller:
+            current_best_fitness = max(fitness_scores) if fitness_scores else 0.0
+            current_mutation_rate = self.adaptive_mutation_controller.update(
+                self.generation, population, fitness_scores, current_best_fitness
+            )
+            
+            # Report adaptive mutation diagnostics
+            if self.config.verbose and self.generation % 10 == 0:
+                diagnostics = self.adaptive_mutation_controller.get_diagnostics()
+                print(f"   🧬 Adaptive mutation: rate={current_mutation_rate:.3f} "
+                      f"({diagnostics['mutation_intensity']}), "
+                      f"diversity={diagnostics['current_diversity']:.3f}, "
+                      f"stagnation={diagnostics['stagnation_count']}")
+        
         # Elitism - preserve best individuals
         elite_indices = sorted(range(len(fitness_scores)), 
                              key=lambda i: fitness_scores[i], reverse=True)[:self.config.elite_size]
@@ -460,9 +622,17 @@ class GeneticRouteOptimizer:
         
         # Generate offspring
         while len(new_population) < self.config.population_size:
-            # Selection
-            parent1 = self.operators.tournament_selection(population, self.config.tournament_size)
-            parent2 = self.operators.tournament_selection(population, self.config.tournament_size)
+            # Selection with diversity consideration
+            if self.diversity_selector:
+                parent1 = self.diversity_selector.tournament_selection_with_diversity(
+                    population, fitness_scores, self.config.tournament_size
+                )
+                parent2 = self.diversity_selector.tournament_selection_with_diversity(
+                    population, fitness_scores, self.config.tournament_size
+                )
+            else:
+                parent1 = self.operators.tournament_selection(population, self.config.tournament_size)
+                parent2 = self.operators.tournament_selection(population, self.config.tournament_size)
             
             # Use constraint-preserving operators if available
             if self.constraint_operators:
@@ -471,12 +641,12 @@ class GeneticRouteOptimizer:
                     parent1, parent2, self.config.crossover_rate
                 )
                 
-                # Use constraint-preserving mutation
+                # Use constraint-preserving mutation with adaptive rate
                 offspring1 = self.constraint_operators.distance_neutral_mutation(
-                    offspring1, self.config.mutation_rate
+                    offspring1, current_mutation_rate
                 )
                 offspring2 = self.constraint_operators.distance_neutral_mutation(
-                    offspring2, self.config.mutation_rate
+                    offspring2, current_mutation_rate
                 )
             else:
                 # Use standard operators
@@ -484,12 +654,9 @@ class GeneticRouteOptimizer:
                     parent1, parent2, self.config.crossover_rate
                 )
                 
-                offspring1 = self.operators.segment_replacement_mutation(
-                    offspring1, self.config.mutation_rate
-                )
-                offspring2 = self.operators.route_extension_mutation(
-                    offspring2, self.fitness_evaluator.target_distance_km, self.config.mutation_rate
-                )
+                # Apply adaptive mutation with strategy selection
+                offspring1 = self._apply_adaptive_mutation(offspring1, current_mutation_rate)
+                offspring2 = self._apply_adaptive_mutation(offspring2, current_mutation_rate)
             
             # Add to population
             new_population.extend([offspring1, offspring2])
@@ -507,7 +674,120 @@ class GeneticRouteOptimizer:
             new_population, new_fitness_scores
         )
         
+        # Apply diversity-preserving selection if enabled
+        if self.diversity_selector:
+            filtered_population = self.diversity_selector.select_population(
+                filtered_population, filtered_fitness_scores, self.generation
+            )
+            
+            # Re-evaluate if population changed
+            if len(filtered_population) != len(filtered_fitness_scores):
+                filtered_fitness_scores = self._evaluate_population_with_precision(
+                    filtered_population, self.fitness_evaluator.objective.value, self.fitness_evaluator.target_distance_km
+                )
+        
         return filtered_population, filtered_fitness_scores
+    
+    def _apply_adaptive_mutation(self, chromosome: RouteChromosome, mutation_rate: float) -> RouteChromosome:
+        """Apply adaptive mutation with strategy selection
+        
+        Args:
+            chromosome: Chromosome to mutate
+            mutation_rate: Current adaptive mutation rate
+            
+        Returns:
+            Mutated chromosome
+        """
+        if not self.adaptive_mutation_controller:
+            # Fall back to standard mutation
+            return self.operators.segment_replacement_mutation(chromosome, mutation_rate)
+        
+        # Get mutation strategy weights
+        strategies = self.adaptive_mutation_controller.get_mutation_strategies()
+        
+        # Select mutation strategy based on weights
+        strategy_choice = random.random()
+        cumulative_weight = 0.0
+        
+        for strategy, weight in strategies.items():
+            cumulative_weight += weight
+            if strategy_choice <= cumulative_weight:
+                break
+        
+        # Apply selected mutation strategy
+        if strategy == 'segment_replacement':
+            return self.operators.segment_replacement_mutation(chromosome, mutation_rate)
+        elif strategy == 'route_extension':
+            return self.operators.route_extension_mutation(
+                chromosome, self.fitness_evaluator.target_distance_km, mutation_rate
+            )
+        elif strategy == 'elevation_bias':
+            return self.operators.elevation_bias_mutation(chromosome, mutation_rate)
+        elif strategy == 'long_range_exploration':
+            return self._apply_long_range_mutation(chromosome, mutation_rate)
+        else:
+            # Default to segment replacement
+            return self.operators.segment_replacement_mutation(chromosome, mutation_rate)
+    
+    def _apply_long_range_mutation(self, chromosome: RouteChromosome, mutation_rate: float) -> RouteChromosome:
+        """Apply long-range exploration mutation
+        
+        Args:
+            chromosome: Chromosome to mutate
+            mutation_rate: Current mutation rate
+            
+        Returns:
+            Mutated chromosome with long-range exploration
+        """
+        if random.random() > mutation_rate or not chromosome.segments:
+            return chromosome
+        
+        mutated = chromosome.copy()
+        mutated.creation_method = "long_range_exploration_mutation"
+        
+        # Find high-elevation nodes that are not currently in the route
+        route_nodes = set()
+        for segment in chromosome.segments:
+            route_nodes.add(segment.start_node)
+            route_nodes.add(segment.end_node)
+        
+        # Find high-elevation nodes not in current route
+        high_elevation_nodes = []
+        for node_id, node_data in self.graph.nodes(data=True):
+            if (node_id not in route_nodes and 
+                node_data.get('elevation', 0) > 650):  # Above 650m elevation
+                high_elevation_nodes.append(node_id)
+        
+        if not high_elevation_nodes:
+            # Fall back to standard mutation
+            return self.operators.segment_replacement_mutation(chromosome, mutation_rate)
+        
+        # Select a random high-elevation target
+        target_node = random.choice(high_elevation_nodes)
+        
+        # Try to modify a segment to go toward the target
+        if mutated.segments:
+            # Replace a random segment with a path toward the target
+            segment_index = random.randint(0, len(mutated.segments) - 1)
+            old_segment = mutated.segments[segment_index]
+            
+            # Try to create a path from segment start to target
+            try:
+                if nx.has_path(self.graph, old_segment.start_node, target_node):
+                    # Create path to target
+                    path = nx.shortest_path(self.graph, old_segment.start_node, target_node)
+                    
+                    # Only use if path is reasonable length (not too long)
+                    if len(path) <= 5:
+                        from .chromosome import RouteSegment
+                        new_segment = RouteSegment(old_segment.start_node, target_node, path)
+                        new_segment.calculate_properties(self.graph)
+                        mutated.segments[segment_index] = new_segment
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                # Fall back to standard mutation
+                return self.operators.segment_replacement_mutation(chromosome, mutation_rate)
+        
+        return mutated
     
     def _check_convergence(self, fitness_scores: List[float]) -> bool:
         """Check if population has converged"""
