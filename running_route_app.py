@@ -26,12 +26,6 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Add refactored banner
-st.markdown("""
-<div style="background-color: #f0f2f6; padding: 10px; border-radius: 5px; margin-bottom: 20px;">
-    ✨ <strong>Refactored Version</strong> - Now using shared route services for consistency with CLI
-</div>
-""", unsafe_allow_html=True)
 
 @st.cache_resource
 def initialize_route_services():
@@ -84,10 +78,8 @@ def create_base_map(services):
         tiles='OpenStreetMap'
     )
     
-    # Add sample of nodes to map (to avoid overcrowding)
-    node_sample = list(graph.nodes(data=True))[:50]  # Show first 50 nodes
-    
-    for node_id, data in node_sample:
+    # Add all nodes to map for starting point selection
+    for node_id, data in graph.nodes(data=True):
         lat, lon = data['y'], data['x']
         elevation = data.get('elevation', 0)
         
@@ -103,11 +95,12 @@ def create_base_map(services):
         
         folium.CircleMarker(
             location=[lat, lon],
-            radius=3,
-            popup=f"Node: {node_id}<br>Elevation: {elevation:.0f}m",
+            radius=2,  # Smaller radius to reduce clutter
+            popup=f"Node: {node_id}<br>Elevation: {elevation:.0f}m<br>Click to select as start",
             color=color,
             fill=True,
-            fillOpacity=0.7
+            fillOpacity=0.5,  # More transparent
+            weight=1
         ).add_to(m)
     
     return m
@@ -392,8 +385,8 @@ help="Genetic: Advanced genetic algorithm optimization"
             st.error("Failed to create map")
             return
         
-        # Check for map click or use default
-        start_node = 1529188403  # Default starting node
+        # Check for map click or use dynamic default
+        start_node = network_manager.get_start_node(graph)  # Dynamic default starting node
         
         if map_data['last_clicked']:
             clicked_lat = map_data['last_clicked']['lat']
