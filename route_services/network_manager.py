@@ -285,10 +285,12 @@ class NetworkManager:
                 'geometry': Point(data.get('x', 0), data.get('y', 0))
             })
         
-        nodes_gdf = gpd.GeoDataFrame(nodes_data, crs='EPSG:4326')
-        
-        # Build spatial index for faster queries
-        nodes_gdf.sindex
+        if nodes_data:
+            nodes_gdf = gpd.GeoDataFrame(nodes_data, crs='EPSG:4326')
+            # Build spatial index for faster queries
+            nodes_gdf.sindex
+        else:
+            nodes_gdf = gpd.GeoDataFrame()
         
         # Cache the result
         self._nodes_gdf_cache[graph_id] = nodes_gdf
@@ -337,10 +339,12 @@ class NetworkManager:
                     'geometry': line_geom
                 })
         
-        edges_gdf = gpd.GeoDataFrame(edges_data, crs='EPSG:4326')
-        
-        # Build spatial index for faster queries
-        edges_gdf.sindex
+        if edges_data:
+            edges_gdf = gpd.GeoDataFrame(edges_data, crs='EPSG:4326')
+            # Build spatial index for faster queries
+            edges_gdf.sindex
+        else:
+            edges_gdf = gpd.GeoDataFrame()
         
         # Cache the result
         self._edges_gdf_cache[graph_id] = edges_gdf

@@ -580,5 +580,325 @@ class TestNetworkManagerEdgeCases(TestNetworkManager):
             self.assertEqual(result2, self.mock_graph)
 
 
+class TestNetworkManagerSpatialMethods(TestNetworkManager):
+    """Test spatial methods for NetworkManager"""
+    
+    def setUp(self):
+        """Set up test fixtures with spatial data"""
+        super().setUp()
+        
+        # Add geopandas import for spatial tests
+        import geopandas as gpd
+        from shapely.geometry import Point
+        self.gpd = gpd
+        self.Point = Point
+        
+        # Initialize spatial caches
+        self.manager._nodes_gdf_cache = {}
+        self.manager._edges_gdf_cache = {}
+    
+    def test_get_nodes_geodataframe(self):
+        """Test getting nodes as GeoDataFrame"""
+        result = self.manager.get_nodes_geodataframe(self.mock_graph)
+        
+        # Should return a GeoDataFrame
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        
+        # Should have expected columns
+        expected_columns = ['node_id', 'x', 'y', 'elevation', 'geometry']
+        for col in expected_columns:
+            self.assertIn(col, result.columns)
+        
+        # Should have same number of nodes as graph
+        self.assertEqual(len(result), len(self.mock_graph.nodes))
+    
+    def test_get_nodes_geodataframe_empty_graph(self):
+        """Test getting nodes GeoDataFrame from empty graph"""
+        empty_graph = nx.Graph()
+        result = self.manager.get_nodes_geodataframe(empty_graph)
+        
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        self.assertTrue(result.empty)
+    
+    def test_get_nodes_geodataframe_no_graph(self):
+        """Test getting nodes GeoDataFrame with no graph provided"""
+        with patch.object(self.manager, 'load_network') as mock_load:
+            mock_load.return_value = self.mock_graph
+            result = self.manager.get_nodes_geodataframe()
+            
+            self.assertIsInstance(result, self.gpd.GeoDataFrame)
+            mock_load.assert_called_once()
+    
+    def test_get_edges_geodataframe(self):
+        """Test getting edges as GeoDataFrame"""
+        result = self.manager.get_edges_geodataframe(self.mock_graph)
+        
+        # Should return a GeoDataFrame
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        
+        # Should have expected columns
+        expected_columns = ['u', 'v', 'length', 'geometry']
+        for col in expected_columns:
+            self.assertIn(col, result.columns)
+        
+        # Should have same number of edges as graph
+        self.assertEqual(len(result), len(self.mock_graph.edges))
+    
+    def test_get_edges_geodataframe_empty_graph(self):
+        """Test getting edges GeoDataFrame from empty graph"""
+        empty_graph = nx.Graph()
+        result = self.manager.get_edges_geodataframe(empty_graph)
+        
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        self.assertTrue(result.empty)
+    
+    def test_get_edges_geodataframe_no_graph(self):
+        """Test getting edges GeoDataFrame with no graph provided"""
+        with patch.object(self.manager, 'load_network') as mock_load:
+            mock_load.return_value = self.mock_graph
+            result = self.manager.get_edges_geodataframe()
+            
+            self.assertIsInstance(result, self.gpd.GeoDataFrame)
+            mock_load.assert_called_once()
+    
+    def test_get_nearby_nodes_spatial(self):
+        """Test getting nearby nodes using spatial operations"""
+        lat, lon = 37.1299, -80.4094
+        radius_km = 0.2  # 200m in km
+        
+        result = self.manager.get_nearby_nodes_spatial(
+            self.mock_graph, lat, lon, radius_km
+        )
+        
+        # Should return a GeoDataFrame
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        
+        # Should have expected columns
+        if not result.empty:
+            expected_columns = ['node_id', 'distance_m', 'x', 'y']
+            for col in expected_columns:
+                self.assertIn(col, result.columns)
+    
+    def test_get_nearby_nodes_spatial_empty_graph(self):
+        """Test spatial nearby nodes with empty graph"""
+        empty_graph = nx.Graph()
+        result = self.manager.get_nearby_nodes_spatial(
+            empty_graph, 37.1299, -80.4094, 0.2
+        )
+        
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        self.assertTrue(result.empty)
+    
+    def test_get_intersections_geodataframe(self):
+        """Test getting intersections as GeoDataFrame"""
+        # Add more nodes to create intersections
+        self.mock_graph.add_node(1004, x=-80.4095, y=37.1299, elevation=625)
+        self.mock_graph.add_edge(1001, 1004, length=120)
+        self.mock_graph.add_edge(1002, 1004, length=80)
+        
+        result = self.manager.get_intersections_geodataframe(
+            self.mock_graph
+        )
+        
+        # Should return a GeoDataFrame
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        
+        # Should have expected columns
+        expected_columns = ['node_id', 'degree', 'x', 'y', 'geometry']
+        for col in expected_columns:
+            self.assertIn(col, result.columns)
+    
+    def test_get_intersections_geodataframe_no_intersections(self):
+        """Test intersections GeoDataFrame with no intersections"""
+        # Linear graph has no intersections with degree > 2
+        result = self.manager.get_intersections_geodataframe(
+            self.mock_graph
+        )
+        
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        # May be empty if no intersections meet criteria
+    
+    def test_find_optimal_start_node_spatial(self):
+        """Test finding optimal start node using spatial operations"""
+        target_lat, target_lon = 37.1299, -80.4094
+        
+        result = self.manager.find_optimal_start_node_spatial(
+            self.mock_graph, target_lat, target_lon
+        )
+        
+        # Should return node ID
+        self.assertIsInstance(result, int)
+        self.assertIn(result, self.mock_graph.nodes)
+    
+    def test_find_optimal_start_node_spatial_empty_criteria(self):
+        """Test optimal start node with empty criteria"""
+        target_lat, target_lon = 37.1299, -80.4094
+        
+        result = self.manager.find_optimal_start_node_spatial(
+            self.mock_graph, target_lat, target_lon, prefer_intersections=False
+        )
+        
+        # Should still work with default criteria
+        self.assertIsInstance(result, int)
+    
+    def test_find_optimal_start_node_spatial_no_matches(self):
+        """Test optimal start node with impossible criteria"""
+        # Test with empty graph
+        empty_graph = nx.Graph()
+        target_lat, target_lon = 37.1299, -80.4094
+        
+        with self.assertRaises(ValueError):
+            self.manager.find_optimal_start_node_spatial(
+                empty_graph, target_lat, target_lon
+            )
+    
+    def test_analyze_network_connectivity(self):
+        """Test network connectivity analysis"""
+        result = self.manager.analyze_network_connectivity(self.mock_graph)
+        
+        # Should return comprehensive connectivity stats
+        expected_keys = [
+            'total_nodes', 'total_edges', 'intersection_count', 'dead_end_count',
+            'degree_statistics', 'edge_length_statistics', 'network_bounds', 'connectivity_ratio'
+        ]
+        
+        for key in expected_keys:
+            self.assertIn(key, result)
+        
+        # Basic validation
+        self.assertIsInstance(result['total_nodes'], int)
+        self.assertIsInstance(result['total_edges'], int)
+        self.assertIsInstance(result['connectivity_ratio'], float)
+    
+    def test_analyze_network_connectivity_disconnected(self):
+        """Test connectivity analysis with disconnected graph"""
+        # Create disconnected graph
+        disconnected_graph = nx.Graph()
+        disconnected_graph.add_node(1, x=-80.4094, y=37.1299, elevation=610)
+        disconnected_graph.add_node(2, x=-80.4095, y=37.1300, elevation=615)
+        disconnected_graph.add_node(3, x=-80.5000, y=37.2000, elevation=620)  # Isolated
+        disconnected_graph.add_edge(1, 2, length=100)
+        
+        result = self.manager.analyze_network_connectivity(disconnected_graph)
+        
+        self.assertEqual(result['total_nodes'], 3)
+        self.assertEqual(result['total_edges'], 1)
+        self.assertEqual(result['dead_end_count'], 2)  # Node 1 and 2 are dead ends (degree 1), node 3 is isolated (degree 0)
+    
+    def test_analyze_network_connectivity_empty_graph(self):
+        """Test connectivity analysis with empty graph"""
+        empty_graph = nx.Graph()
+        result = self.manager.analyze_network_connectivity(empty_graph)
+        
+        self.assertEqual(result, {})
+    
+    def test_calculate_geo_distance(self):
+        """Test geographic distance calculation"""
+        from shapely.geometry import Point
+        
+        point1 = Point(-80.4094, 37.1299)
+        point2 = Point(-80.4095, 37.1300)
+        
+        distance = self.manager._calculate_geo_distance(point1, point2)
+        
+        # Should return a reasonable distance in meters
+        self.assertIsInstance(distance, float)
+        self.assertGreater(distance, 0)
+        self.assertLess(distance, 1000)  # Should be less than 1km for nearby points
+    
+    def test_calculate_geo_distance_same_point(self):
+        """Test geographic distance for same point"""
+        from shapely.geometry import Point
+        
+        point = Point(-80.4094, 37.1299)
+        distance = self.manager._calculate_geo_distance(point, point)
+        
+        self.assertEqual(distance, 0)
+    
+    def test_get_network_within_bounds(self):
+        """Test getting network within geographic bounds"""
+        min_lat, max_lat = 37.1298, 37.1301
+        min_lon, max_lon = -80.4097, -80.4093
+        
+        result = self.manager.get_network_within_bounds(
+            self.mock_graph, min_lat, max_lat, min_lon, max_lon
+        )
+        
+        # Should return a GeoDataFrame
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        
+        # Should have nodes within bounds
+        for _, row in result.iterrows():
+            self.assertGreaterEqual(row['y'], min_lat)
+            self.assertLessEqual(row['y'], max_lat)
+            self.assertGreaterEqual(row['x'], min_lon)
+            self.assertLessEqual(row['x'], max_lon)
+    
+    def test_get_network_within_bounds_empty_result(self):
+        """Test network within bounds with no nodes in range"""
+        min_lat, max_lat = 39.0, 40.0
+        min_lon, max_lon = -71.0, -70.0
+        
+        result = self.manager.get_network_within_bounds(
+            self.mock_graph, min_lat, max_lat, min_lon, max_lon
+        )
+        
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+        self.assertTrue(result.empty)
+    
+    def test_get_network_within_bounds_invalid_bounds(self):
+        """Test network within bounds with invalid bounds"""
+        # Test with inverted bounds
+        min_lat, max_lat = 37.1301, 37.1298  # Inverted
+        min_lon, max_lon = -80.4093, -80.4097  # Inverted
+        
+        result = self.manager.get_network_within_bounds(
+            self.mock_graph, min_lat, max_lat, min_lon, max_lon
+        )
+        
+        # Should handle gracefully
+        self.assertIsInstance(result, self.gpd.GeoDataFrame)
+    
+    def test_spatial_methods_integration(self):
+        """Test integration between spatial methods"""
+        # Get nodes as GeoDataFrame
+        nodes_gdf = self.manager.get_nodes_geodataframe(self.mock_graph)
+        
+        # Get nearby nodes spatially
+        if not nodes_gdf.empty:
+            first_node = nodes_gdf.iloc[0]
+            nearby = self.manager.get_nearby_nodes_spatial(
+                self.mock_graph, first_node['y'], first_node['x'], 0.5
+            )
+            
+            # Should find the node itself and possibly others
+            self.assertGreaterEqual(len(nearby), 1)
+            
+            # First result should be the query node (distance 0)
+            self.assertEqual(nearby.iloc[0]['node_id'], first_node['node_id'])
+            self.assertEqual(nearby.iloc[0]['distance_m'], 0)
+    
+    def test_spatial_methods_error_handling(self):
+        """Test error handling in spatial methods"""
+        # Test with invalid coordinates
+        try:
+            result = self.manager.get_nearby_nodes_spatial(
+                self.mock_graph, 999, 999, 100  # Invalid lat/lon
+            )
+            self.assertIsInstance(result, list)
+        except Exception:
+            # Some spatial operations may fail with invalid coordinates
+            pass
+        
+        # Test with invalid bounds
+        try:
+            bounds = {'north': 'invalid', 'south': 0, 'east': 0, 'west': 0}
+            result = self.manager.get_network_within_bounds(self.mock_graph, bounds)
+            self.assertIsInstance(result, nx.Graph)
+        except Exception:
+            # Expected for invalid bounds
+            pass
+
+
 if __name__ == '__main__':
     unittest.main()

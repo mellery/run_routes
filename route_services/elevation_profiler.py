@@ -589,7 +589,8 @@ class ElevationProfiler:
             start_row['grade_percent'] = (start_row['elevation_change_m'] / return_distance * 100) if return_distance > 0 else 0
             
             # Add to GeoDataFrame
-            route_gdf = pd.concat([route_gdf, start_row.to_frame().T], ignore_index=True)
+            start_row_df = gpd.GeoDataFrame([start_row.to_dict()], crs=route_gdf.crs)
+            route_gdf = pd.concat([route_gdf, start_row_df], ignore_index=True)
         
         # Interpolate additional points if requested
         if interpolate_points > 0:
@@ -788,7 +789,7 @@ class ElevationProfiler:
             next_row = route_gdf.iloc[i + 1]
             
             # Add current point
-            interpolated_data.append(current_row)
+            interpolated_data.append(current_row.to_dict())
             
             # Interpolate between current and next point
             for j in range(1, points_per_segment + 1):
@@ -814,7 +815,7 @@ class ElevationProfiler:
                 })
         
         # Add last point
-        interpolated_data.append(route_gdf.iloc[-1])
+        interpolated_data.append(route_gdf.iloc[-1].to_dict())
         
         # Create new GeoDataFrame
         interpolated_gdf = gpd.GeoDataFrame(interpolated_data, crs='EPSG:4326')

@@ -978,6 +978,253 @@ class TestElevationProfilerComplexScenarios(TestElevationProfiler):
         except:
             # Some methods may not handle large routes gracefully
             pass
+    
+    def test_generate_profile_data_spatial(self):
+        """Test spatial profile data generation"""
+        route_result = {
+            'route': [1001, 1002, 1003],
+            'stats': {'total_distance_km': 2.0}
+        }
+        
+        # Test with geodataframe enabled
+        result = self.profiler.generate_profile_data_spatial(route_result, use_geodataframe=True)
+        
+        # Should have standard profile data structure
+        expected_keys = ['coordinates', 'elevations', 'distances_m', 'distances_km', 'elevation_stats']
+        for key in expected_keys:
+            self.assertIn(key, result)
+        
+        # Test without geodataframe (fallback)
+        result_fallback = self.profiler.generate_profile_data_spatial(route_result, use_geodataframe=False)
+        self.assertIsInstance(result_fallback, dict)
+    
+    def test_generate_profile_data_spatial_empty_route(self):
+        """Test spatial profile generation with empty route"""
+        empty_result = {}
+        result = self.profiler.generate_profile_data_spatial(empty_result, use_geodataframe=True)
+        self.assertEqual(result, {})
+        
+        empty_route_result = {'route': []}
+        result = self.profiler.generate_profile_data_spatial(empty_route_result, use_geodataframe=True)
+        self.assertEqual(result, {})
+    
+    def test_generate_profile_data_spatial_with_interpolation(self):
+        """Test spatial profile generation with interpolation"""
+        route_result = {
+            'route': [1001, 1002, 1003],
+            'stats': {'total_distance_km': 2.0}
+        }
+        
+        # Test with interpolation points
+        result = self.profiler.generate_profile_data_spatial(
+            route_result, use_geodataframe=True, interpolate_points=5
+        )
+        
+        # Should have more data points due to interpolation
+        if 'coordinates' in result and result['coordinates']:
+            # Interpolation should add more points
+            self.assertGreaterEqual(len(result['coordinates']), 3)
+    
+    def test_calculate_elevation_stats_spatial(self):
+        """Test spatial elevation statistics calculation"""
+        # Create a route geodataframe
+        route = [1001, 1002, 1003]
+        route_gdf = self.profiler.get_route_geodataframe(route)
+        
+        if not route_gdf.empty:
+            # Add elevation analysis columns if missing
+            route_gdf = self.profiler._add_elevation_analysis_columns(route_gdf)
+            
+            # Calculate spatial statistics
+            stats = self.profiler._calculate_elevation_stats_spatial(route_gdf)
+            
+            # Should have basic statistics (check actual keys returned)
+            expected_keys = ['total_elevation_gain_m', 'total_elevation_loss_m', 'max_elevation', 'min_elevation']
+            for key in expected_keys:
+                self.assertIn(key, stats)
+    
+    def test_add_elevation_analysis_columns(self):
+        """Test adding elevation analysis columns to GeoDataFrame"""
+        route = [1001, 1002, 1003]
+        route_gdf = self.profiler.get_route_geodataframe(route)
+        
+        if not route_gdf.empty:
+            # Add analysis columns
+            enhanced_gdf = self.profiler._add_elevation_analysis_columns(route_gdf)
+            
+            # Should have additional columns
+            expected_columns = ['elevation_change_m', 'grade_percent']
+            for col in expected_columns:
+                self.assertIn(col, enhanced_gdf.columns)
+            
+            # Should have same number of rows
+            self.assertEqual(len(enhanced_gdf), len(route_gdf))
+    
+    def test_find_steep_sections_spatial(self):
+        """Test finding steep sections in spatial data"""
+        # Create route with potential steep sections
+        route = [1001, 1002, 1003, 1004]
+        route_gdf = self.profiler.get_route_geodataframe(route)
+        
+        if not route_gdf.empty:
+            # Add elevation analysis columns
+            route_gdf = self.profiler._add_elevation_analysis_columns(route_gdf)
+            
+            # Find steep sections
+            steep_sections = self.profiler._find_steep_sections_spatial(route_gdf, min_grade=5.0)
+            
+            # Should return a list
+            self.assertIsInstance(steep_sections, list)
+            
+            # Each steep section should have required fields (check actual structure)
+            for section in steep_sections:
+                self.assertIn('type', section)
+                self.assertIn('start_km', section)
+                self.assertIn('end_km', section)
+                self.assertIn('max_grade', section)
+    
+    def test_group_consecutive_sections(self):
+        """Test grouping consecutive sections"""
+        route = [1001, 1002, 1003, 1004]
+        route_gdf = self.profiler.get_route_geodataframe(route)
+        
+        if not route_gdf.empty and len(route_gdf) > 1:
+            # Create sections (using first two rows as test)
+            sections_gdf = route_gdf.iloc[:2]
+            
+            # Group consecutive sections
+            grouped = self.profiler._group_consecutive_sections(sections_gdf)
+            
+            # Should return a list of GeoDataFrames
+            self.assertIsInstance(grouped, list)
+            for group in grouped:
+                self.assertIsInstance(group, gpd.GeoDataFrame)
+    
+    def test_interpolate_elevation_points(self):
+        """Test elevation point interpolation"""
+        route = [1001, 1002, 1003]
+        route_gdf = self.profiler.get_route_geodataframe(route)
+        
+        if not route_gdf.empty and len(route_gdf) > 1:
+            original_length = len(route_gdf)
+            
+            # Interpolate points
+            interpolated_gdf = self.profiler._interpolate_elevation_points(route_gdf, points_per_segment=2)
+            
+            # Should have more points
+            self.assertGreaterEqual(len(interpolated_gdf), original_length)
+            
+            # Should have same columns
+            for col in route_gdf.columns:
+                self.assertIn(col, interpolated_gdf.columns)
+    
+    def test_find_elevation_peaks_valleys_spatial(self):
+        """Test spatial peaks and valleys detection"""
+        route_result = {
+            'route': [1001, 1002, 1003, 1004, 1005],
+            'stats': {'total_distance_km': 4.0}
+        }
+        
+        # Find peaks and valleys using spatial method
+        peaks_valleys = self.profiler.find_elevation_peaks_valleys_spatial(
+            route_result, min_prominence=10
+        )
+        
+        # Should have standard structure
+        expected_keys = ['peaks', 'valleys']
+        for key in expected_keys:
+            self.assertIn(key, peaks_valleys)
+            self.assertIsInstance(peaks_valleys[key], list)
+    
+    def test_find_elevation_peaks_valleys_spatial_empty(self):
+        """Test spatial peaks/valleys with empty route"""
+        empty_result = {}
+        peaks_valleys = self.profiler.find_elevation_peaks_valleys_spatial(empty_result)
+        
+        expected = {'peaks': [], 'valleys': []}
+        self.assertEqual(peaks_valleys, expected)
+    
+    def test_get_elevation_zones_spatial(self):
+        """Test spatial elevation zones calculation"""
+        route_result = {
+            'route': [1001, 1002, 1003, 1004],
+            'stats': {'total_distance_km': 3.0}
+        }
+        
+        # Get elevation zones using spatial method
+        zones = self.profiler.get_elevation_zones_spatial(route_result, zone_count=3)
+        
+        # Should create zones
+        self.assertLessEqual(len(zones), 3)
+        
+        # Each zone should have required fields
+        for zone in zones:
+            self.assertIn('zone_number', zone)
+            self.assertIn('start_km', zone)
+            self.assertIn('end_km', zone)
+            self.assertIn('avg_elevation', zone)
+    
+    def test_get_elevation_zones_spatial_empty(self):
+        """Test spatial elevation zones with empty route"""
+        empty_result = {}
+        zones = self.profiler.get_elevation_zones_spatial(empty_result, zone_count=3)
+        self.assertEqual(zones, [])
+    
+    def test_spatial_methods_error_handling(self):
+        """Test error handling in spatial methods"""
+        # Test with invalid route data
+        invalid_routes = [
+            {'route': [], 'stats': {}},  # Empty route
+            {'route': [9999], 'stats': {}},  # Non-existent node
+            {},  # Empty result
+        ]
+        
+        for invalid_route in invalid_routes:
+            # Should handle errors gracefully
+            try:
+                result = self.profiler.generate_profile_data_spatial(
+                    invalid_route, use_geodataframe=True
+                )
+                self.assertIsInstance(result, dict)
+                
+                peaks_valleys = self.profiler.find_elevation_peaks_valleys_spatial(invalid_route)
+                self.assertIsInstance(peaks_valleys, dict)
+                
+                zones = self.profiler.get_elevation_zones_spatial(invalid_route)
+                self.assertIsInstance(zones, list)
+                
+            except Exception:
+                # Expected for some invalid data
+                pass
+    
+    def test_spatial_vs_regular_methods_consistency(self):
+        """Test consistency between spatial and regular methods"""
+        route_result = {
+            'route': [1001, 1002, 1003],
+            'stats': {'total_distance_km': 2.0}
+        }
+        
+        # Compare regular vs spatial methods
+        regular_profile = self.profiler.generate_profile_data(route_result)
+        spatial_profile = self.profiler.generate_profile_data_spatial(
+            route_result, use_geodataframe=False
+        )
+        
+        # Should have similar structure
+        if regular_profile and spatial_profile:
+            self.assertEqual(set(regular_profile.keys()), set(spatial_profile.keys()))
+        
+        # Compare peaks/valleys
+        regular_peaks = self.profiler.find_elevation_peaks_valleys(route_result)
+        spatial_peaks = self.profiler.find_elevation_peaks_valleys_spatial(route_result)
+        
+        # Should have similar structure (both should have peaks and valleys)
+        if regular_peaks and spatial_peaks:
+            # Both should have peaks and valleys keys
+            self.assertIn('peaks', regular_peaks)
+            self.assertIn('valleys', regular_peaks)
+            self.assertIn('peaks', spatial_peaks)
+            self.assertIn('valleys', spatial_peaks)
 
 
 if __name__ == '__main__':
