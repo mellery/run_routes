@@ -132,7 +132,7 @@ class TerrainProfilePlotter:
     
     def _enhance_resolution(self, elevations: List[float], 
                           distances_km: List[float]) -> Tuple[List[float], List[float]]:
-        """Enhance resolution through interpolation
+        """Enhance resolution to match 1-meter elevation data precision
         
         Args:
             elevations: Original elevation data
@@ -144,15 +144,30 @@ class TerrainProfilePlotter:
         if len(elevations) < 3:
             return elevations, distances_km
         
-        # Target resolution: point every 25 meters
-        target_spacing_km = 0.025
         total_distance = distances_km[-1]
+        
+        # Use 1-meter resolution to match our 3DEP elevation data
+        # But limit maximum points for performance and visual clarity
+        if total_distance <= 2.0:  # Routes ≤ 2km: 1m resolution
+            target_spacing_km = 0.001  # 1 meter
+            max_points = 2000
+        elif total_distance <= 5.0:  # Routes ≤ 5km: 2m resolution  
+            target_spacing_km = 0.002  # 2 meters
+            max_points = 2500
+        elif total_distance <= 10.0:  # Routes ≤ 10km: 5m resolution
+            target_spacing_km = 0.005  # 5 meters
+            max_points = 2000
+        else:  # Long routes: 10m resolution
+            target_spacing_km = 0.010  # 10 meters
+            max_points = 1000
+        
         target_points = int(total_distance / target_spacing_km)
+        target_points = min(target_points, max_points)
         
-        # Limit to reasonable number of points
-        target_points = min(target_points, 500)
+        # Ensure minimum reasonable resolution
+        target_points = max(target_points, 100)
         
-        # Interpolate
+        # Interpolate to high resolution
         new_distances = np.linspace(0, total_distance, target_points)
         new_elevations = np.interp(new_distances, distances_km, elevations)
         

@@ -179,8 +179,17 @@ class EnhancedElevationProfiler:
         if len(coordinates) < 2:
             return coordinates, elevations, distances
         
-        # Target spacing for interpolated points (meters)
-        target_spacing = 50  # 50m spacing for smooth profiles
+        # Target spacing for interpolated points (meters) - match 1m elevation resolution
+        total_route_distance = distances[-1] if distances else 0
+        
+        if total_route_distance <= 2000:  # Routes ≤ 2km: 1m spacing
+            target_spacing = 1  
+        elif total_route_distance <= 5000:  # Routes ≤ 5km: 2m spacing
+            target_spacing = 2
+        elif total_route_distance <= 10000:  # Routes ≤ 10km: 5m spacing
+            target_spacing = 5
+        else:  # Long routes: 10m spacing
+            target_spacing = 10
         
         new_coordinates = []
         new_elevations = []
