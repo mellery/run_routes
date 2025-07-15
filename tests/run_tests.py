@@ -277,7 +277,7 @@ def run_coverage_tests():
         # Run pytest with coverage
         cmd = [
             "python", "-m", "pytest",
-            "tests/unit",  # Focus on unit tests for coverage
+            "unit",  # Focus on unit tests for coverage
             "--cov=route_services",
             "--cov=genetic_algorithm",
             "--cov=route",

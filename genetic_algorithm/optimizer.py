@@ -537,6 +537,9 @@ class GeneticRouteOptimizer:
     
     def _adapt_configuration(self, distance_km: float):
         """Adapt GA configuration based on problem size"""
+        if not self.config.adaptive_sizing:
+            return
+
         # Adjust population size based on distance
         if distance_km < 3.0:
             self.config.population_size = max(50, self.config.population_size // 2)
