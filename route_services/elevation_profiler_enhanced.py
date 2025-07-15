@@ -505,7 +505,7 @@ class EnhancedElevationProfiler:
             
             return total_distance
             
-        except (nx.NetworkXNoPath, KeyError):
+        except (nx.NetworkXNoPath, nx.NodeNotFound, KeyError):
             # Fallback to haversine distance if no path found
             try:
                 node1_data = self.graph.nodes[node1]

@@ -377,7 +377,12 @@ def main():
     
     plt.savefig(filename, dpi=300, bbox_inches='tight', 
                 facecolor='white', edgecolor='none')
-    plt.show()
+    
+    # Only show plot if not running in test environment
+    if not os.environ.get('PYTEST_CURRENT_TEST') and not any('unittest' in arg for arg in sys.argv):
+        plt.show()
+    else:
+        plt.close()
 
     print('\n' + '=' * 80)
     print(f'SUMMARY - K={args.k} SHORTEST PATHS ANALYSIS')

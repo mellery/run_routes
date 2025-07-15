@@ -480,7 +480,12 @@ def main():
                            edge_color='gray', edge_linewidth=0.5, show=False, close=False)
     plt.colorbar(ax.collections[0], ax=ax, label='Elevation (m)')
     plt.title('Street Network with Elevation Data')
-    plt.show()
+    
+    # Only show plot if not running in test environment
+    if not os.environ.get('PYTEST_CURRENT_TEST') and not any('unittest' in arg for arg in sys.argv):
+        plt.show()
+    else:
+        plt.close(fig)
 
 if __name__ == "__main__":
     main()
