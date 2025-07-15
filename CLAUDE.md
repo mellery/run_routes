@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a **refactored Python geospatial analysis project** focused on running route optimization using OpenStreetMap data and elevation information. The project uses a **shared services architecture** to eliminate code duplication between CLI and web applications, providing optimized running routes for Christiansburg, Virginia.
+This is a **Python geospatial analysis project** focused on running route optimization using OpenStreetMap data and elevation information. The project uses a **shared services architecture** to eliminate code duplication between CLI and web applications, providing optimized running routes for Christiansburg, Virginia.
 
-**Key Architecture Changes:**
+**Key Architecture:**
 - ✅ **Refactored to shared services**: Zero code duplication between applications
 - ✅ **3DEP 1m Elevation Integration**: Complete integration with 1-meter precision elevation data
 - ✅ **Genetic Algorithm Implementation**: Complete GA-based route optimization alongside existing TSP solvers
@@ -36,7 +36,7 @@ The project relies on several geospatial and data visualization libraries (avail
 
 ## Code Architecture
 
-**Refactored Shared Services Architecture:**
+**Shared Services Architecture:**
 
 ### Shared Route Services (`route_services/`)
 - **NetworkManager** - Graph loading, caching, node operations
@@ -46,7 +46,7 @@ The project relies on several geospatial and data visualization libraries (avail
 - **RouteAnalyzer** - Route analysis, statistics, turn-by-turn directions
 - **ElevationProfiler** - Elevation profile generation and analysis (enhanced with 3DEP 1m precision)
 - **RouteFormatter** - Platform-agnostic output formatting
-- **GAVisualizer** - 🚧 **IN DEVELOPMENT**: GA development visualizations
+- **GAVisualizer** - Development visualizations (in `genetic_algorithm/visualization.py`)
 
 ### Applications (Using Shared Services)
 - **CLI Route Planner** (`cli_route_planner.py`) - Command-line interface
@@ -54,11 +54,14 @@ The project relies on several geospatial and data visualization libraries (avail
 
 ### Core Utilities
 - `route.py` - Core geospatial utility functions
-- **Genetic Algorithm (✅ COMPLETED):**
-  - `genetic_route_optimizer.py` - GA implementation with segment-based encoding
-  - `ga_chromosome.py` - Route chromosome and segment representations
-  - `ga_operators.py` - Crossover, mutation, and selection operators
-  - `ga_visualizer.py` - Development visualization tools
+- **Genetic Algorithm (✅ COMPLETED):** Located in `genetic_algorithm/` directory
+  - `genetic_algorithm/optimizer.py` - GA implementation with segment-based encoding
+  - `genetic_algorithm/chromosome.py` - Route chromosome and segment representations
+  - `genetic_algorithm/operators.py` - Crossover, mutation, and selection operators
+  - `genetic_algorithm/visualization.py` - Development visualization tools
+  - `genetic_algorithm/fitness.py` - Fitness evaluation system
+  - `genetic_algorithm/population.py` - Population initialization and management
+  - `genetic_algorithm/performance.py` - Performance optimization components
 - **3DEP Elevation Integration (✅ COMPLETED):**
   - `elevation_data_sources.py` - Multi-source elevation data abstraction layer
   - `route_services/elevation_profiler_enhanced.py` - Enhanced profiler with 3DEP 1m precision
@@ -71,8 +74,6 @@ The project relies on several geospatial and data visualization libraries (avail
 - `valid_3dep_coordinate.txt` - Validated 3DEP coverage coordinate (36.846651, -78.409308)
 - `srtm_data/` - Contains additional SRTM data files and documentation
 - `cache/` - Contains cached JSON data files (likely OSMnx cache)
-
-The script currently focuses on analyzing a specific node (ID: 216507089) and visualizing the street network with node and edge information.
 
 ## First-Time Setup
 
@@ -175,32 +176,11 @@ python tests/run_tests.py all           # All tests including GA (465+ tests, 10
 # Individual GA test files
 python -m unittest tests.unit.test_ga_chromosome -v         # Chromosome classes (32 tests)
 python -m unittest tests.unit.test_ga_population -v         # Population initialization (45 tests)
-python -m unittest tests.unit.test_ga_visualizer -v         # Visualization components (8 tests)
+python -m unittest tests.unit.test_ga_visualizer -v         # Visualization components (8 tests) [DEPRECATED - check genetic_algorithm/visualization.py]
 python -m unittest tests.unit.test_genetic_optimizer -v     # ✅ COMPLETED (14 tests)
 python -m unittest tests.unit.test_ga_operators -v          # ✅ COMPLETED (60+ tests)
 python -m unittest tests.unit.test_ga_fitness -v            # ✅ COMPLETED (16 tests)
 python -m unittest tests.unit.test_ga_performance -v        # ✅ COMPLETED (60+ tests)
-
-# === WEEK 6 INTEGRATION TESTING ✅ COMPLETED ===
-# GA System Integration & Testing (MANDATORY for production deployment)
-python tests/run_tests.py ga-integration   # GA integration tests (25+ tests, real dependencies)
-python tests/run_tests.py benchmark        # GA vs TSP performance benchmarks
-python -m unittest tests.integration.test_ga_integration -v        # GA service integration
-python -m unittest tests.integration.test_ga_real_world -v         # Real-world GA testing
-python -m unittest tests.benchmark.test_ga_vs_tsp_benchmark -v     # Performance benchmarks
-
-# Week 6 Development Verification (MANDATORY visualizations)
-python week6_development_test.py --phase all --save-images          # Complete Week 6 verification
-python week6_development_test.py --phase integration --save-images  # GA integration testing
-python week6_development_test.py --phase applications --save-images # Application integration
-python week6_development_test.py --phase performance --save-images  # Real-world performance
-
-# GA Development Testing with Visualizations (Weeks 1-5)
-python tests/ga_development_test.py --phase initialization --save-images
-python tests/ga_development_test.py --phase crossover --save-images
-python tests/ga_development_test.py --phase mutation --save-images
-python tests/ga_development_test.py --phase evolution --save-images
-python tests/ga_development_test.py --phase comparison --save-images
 
 # === USING SHARED SERVICES DIRECTLY ===
 # Example: Use services in Python
@@ -214,48 +194,25 @@ formatter = RouteFormatter()
 print(formatter.format_route_summary(result))
 "
 
-# === GENETIC ALGORITHM DEVELOPMENT (🚧 IN DEVELOPMENT) ===
+# === GENETIC ALGORITHM DEVELOPMENT (✅ COMPLETED) ===
 # Test GA implementation with visualization
 python -c "
-from route_services import NetworkManager
-from genetic_route_optimizer import GeneticRouteOptimizer
-from ga_visualizer import GAVisualizer
+from route_services import NetworkManager, RouteOptimizer
+from genetic_algorithm.visualization import GAVisualizer
 
 nm = NetworkManager()
 graph = nm.load_network()
-ga = GeneticRouteOptimizer(graph, population_size=50, max_generations=100)
+optimizer = RouteOptimizer(graph)
 viz = GAVisualizer(graph)
 
 # Optimize with visualization
-result = ga.optimize_route_with_viz(1529188403, 5.0, 'maximize_elevation', viz)
+result = optimizer.optimize_route(1529188403, 5.0, 'maximize_elevation', algorithm='genetic')
 print(f'Best route: {result[\"stats\"][\"total_elevation_gain_m\"]}m elevation gain')
 "
 
-# Generate GA development visualizations
-python ga_visualizer.py --test-population --save-images
-python ga_visualizer.py --evolution-animation --generations 50
-python ga_visualizer.py --compare-algorithms --distance 5.0
-
 # === UTILITIES AND ANALYSIS ===
 # Generate visualizations
-python plot_3d_streets.py --dist 800 --exaggeration 10
-
-# === GA DEVELOPMENT FRAMEWORK ✅ COMPLETED ===
-# IMPORTANT: Generate visualizations during GA development for verification
-# All visualizations use OpenStreetMap background with detailed overlays
-
-# GA Development Testing Framework (MANDATORY for development)
-python ga_development_test.py --phase chromosome --save-images     # Test chromosome classes
-python ga_development_test.py --phase initialization --save-images # Test population creation
-python ga_development_test.py --phase comparison --save-images     # Test GA vs TSP comparison
-python ga_development_test.py --phase all --save-images           # Run all development tests
-
-# Individual GA components (available for development)
-# Population visualization - IMPLEMENTED
-# Evolution tracking - PLANNED for Phase 2
-# Chromosome analysis - IMPLEMENTED
-# Algorithm comparison - PLANNED for Phase 2
-# Operator testing - PLANNED for Phase 2
+python terrain_profile_plotter.py --dist 800 --exaggeration 10
 
 # Cache management
 python setup_cache.py                    # Generate common caches
@@ -269,11 +226,6 @@ python generate_cached_graph.py --radius 1200 --enhanced-elevation --force  # Fo
 
 # Core analysis
 python route.py                          # Basic network analysis
-
-# === LEGACY/BACKUP ===
-# Original applications (backed up)
-python cli_route_planner_original.py    # Original CLI
-streamlit run running_route_app_original.py  # Original Streamlit
 
 # Check dependencies
 source venv/bin/activate && pip list
@@ -293,84 +245,6 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
 # - coverage_data.json: JSON coverage data
 ```
 
-**Key Features Completed:**
-- ✅ **Zero Code Duplication**: ~800 lines eliminated via shared services
-- ✅ **Enhanced 3DEP Elevation Pre-computation**: 3DEP 1m elevation data is now pre-computed and stored statically in graph nodes during cache generation, eliminating recursion issues and runtime lookup overhead
-- ✅ **Comprehensive Testing**: 465+ tests (100% passing)
-  - 285 unit tests (route services + GA, fast ~0.02s)
-  - 7 integration tests (mocked workflows) 
-  - 7 smoke tests (real dependencies ~1.2s)
-  - 32 GA chromosome tests (RouteSegment, RouteChromosome classes)
-  - 45 GA population tests (PopulationInitializer with 4 strategies)
-  - 8 GA visualizer tests (GAVisualizer, mocked)
-  - 60+ GA operator tests (crossover, mutation, selection)
-  - 16 GA fitness tests (fitness evaluation, objectives, statistics)
-  - 14 GA optimizer tests (GeneticRouteOptimizer, evolution loop)
-  - 60+ GA performance tests (caching, parallel, distance, memory optimization)
-- ✅ **Robust Test Suite**: Hybrid approach with mocked + real dependency testing
-- ✅ **Production Ready**: Fully refactored applications using shared services
-- ✅ **GA Foundation (Phase 1 Week 1)**: Complete segment-based chromosome system
-  - RouteChromosome and RouteSegment classes with full property calculation
-  - PopulationInitializer with 4 strategies (random walk, directional, elevation-focused, fallback)
-  - GAVisualizer with OpenStreetMap-based development verification images
-  - GADevelopmentTester framework for mandatory verification at development milestones
-- ✅ **GA Genetic Operators (Phase 1 Week 2)**: Complete operator implementation
-  - Crossover operators: segment exchange, path splice crossover
-  - Mutation operators: segment replacement, route extension, elevation bias mutation
-  - Selection operators: tournament, elitism, diversity selection
-  - GAOperatorVisualizer with professional OpenStreetMap-based visualizations
-  - Comprehensive unit testing with 60+ test cases
-- ✅ **GA Evolution Engine (Phase 1 Week 3)**: Complete genetic algorithm implementation
-  - GeneticRouteOptimizer with full evolution loop and adaptive configuration
-  - GAFitnessEvaluator supporting 5 objectives (distance, elevation, balanced, scenic, efficiency)
-  - Convergence detection with early stopping and fitness plateau analysis
-  - Evolution visualization with fitness progression plots and objective comparisons
-  - Comprehensive unit testing with 30+ test cases covering all evolution components
-- ✅ **GA Performance Optimization (Phase 2 Week 4)**: Enterprise-grade performance suite
-  - GAPerformanceCache with LRU caching and thread safety (6.9x speedup)
-  - GAParallelEvaluator with multiprocessing/threading support (4.0x speedup)
-  - GADistanceOptimizer with vectorization and smart caching (4.3x speedup)
-  - GAMemoryOptimizer with object pooling and monitoring (2.1x efficiency)
-  - GAPerformanceBenchmark with comprehensive testing and visualization (82% overall improvement)
-  - 60+ performance optimization unit tests (100% passing)
-
-**Advanced Features Completed:**
-- ✅ **Parameter Tuning (Phase 2 Week 5)**: Complete adaptive parameter adjustment and hyperparameter optimization framework with:
-  - GAParameterTuner: Dynamic parameter adaptation with 7 strategies
-  - GAHyperparameterOptimizer: Automated tuning with 7 optimization methods
-  - GAAlgorithmSelector: Intelligent algorithm selection and performance learning
-  - GAConfigManager: Centralized configuration management with named profiles
-  - Enhanced multi-objective fitness evaluation with 10+ components
-  - Parameter sensitivity analysis with automated recommendations
-  - Comprehensive visualization suite with interactive dashboards
-  - 200+ unit tests for parameter tuning components (100% passing)
-
-**✅ COMPLETED: Week 6 - GA System Integration & Testing (Phase 3)**
-- ✅ **GA Production Integration**: Complete integration of GA into route planning system
-  - RouteOptimizer service with genetic algorithm optimization
-  - CLI application with GA support and enhanced algorithm interface
-  - Streamlit web application with GA integration and intelligent optimization
-  - Genetic algorithm optimization for all route objectives
-- ✅ **Comprehensive Integration Test Suite**: Full testing framework for GA integration
-  - GA integration with route services
-  - Real-world GA testing with actual street networks
-  - Performance benchmarking suite with detailed metrics
-  - Enhanced test runner with ga-integration and benchmark test categories
-- ✅ **Production Deployment Validation**: Ready for production use
-  - GA available in both CLI (--algorithm genetic) and web interfaces
-  - Robust genetic algorithm implementation
-  - Real-world performance testing with memory usage and scalability analysis
-  - Performance benchmarking framework with automated testing
-- ✅ **Week 6 Development Verification**: Mandatory testing and visualization framework
-  - week6_development_test.py: Complete verification framework for Week 6 milestones
-  - GA performance visualizations with detailed metrics
-  - Real-world performance analysis with OpenStreetMap background
-  - Application integration testing for CLI and web interfaces
-  - Automated verification that GA integration is production-ready
-
-**Features In Development:**
-- 🚧 **Enhanced Elevation Optimization**: Population-based search for creative route discovery
-
 **Default Settings:**
 - **Starting node:** 1529188403 (Christiansburg, VA)
 - **Distance:** 5.0km
@@ -384,66 +258,6 @@ python generate_coverage_badge.py         # Generate coverage badges and summary
 - **Visualization:** Required during development for verification
 - **Output format:** PNG images with OpenStreetMap background
 - **Key verification points:** Population initialization, crossover/mutation, fitness evolution
-
-## GA Development Workflow
-
-### **Phase 1: Foundation (Week 1)** ✅ COMPLETED
-```bash
-# Implement core classes
-python -c "from ga_chromosome import RouteChromosome, RouteSegment; print('Classes implemented')"
-
-# MANDATORY: Run unit tests during development  
-python tests/run_tests.py ga             # ✅ 85 tests passing (100% success rate)
-
-# Test chromosome creation with visualization
-python ga_development_test.py --phase chromosome --save-images    # ✅ COMPLETED
-# Creates: ga_dev_chromosome_test_YYYYMMDD_HHMMSS.png
-
-# Verify population initialization
-python ga_development_test.py --phase initialization --save-images # ✅ COMPLETED  
-# Creates: ga_dev_init_pop{size}_dist{distance}_YYYYMMDD_HHMMSS.png
-
-# Verification images show:
-# - Proper route bounds (not entire town)
-# - Correct distance calculations (0.29-3.33km ranges)  
-# - Complete subplots with statistics tables
-# - "No Fitness Data Yet" for generation 0 (expected behavior)
-```
-
-### **Phase 2: Genetic Operators (Week 2)** ✅ COMPLETED
-```bash
-# MANDATORY: Unit tests for genetic operators
-python -m unittest tests.unit.test_ga_operators -v    # ✅ 60+ tests passing (100% success rate)
-
-# Test operators with comprehensive visualization
-python ga_development_test.py --phase operators --save-images    # ✅ COMPLETED
-# Creates: ga_dev_operators_crossover_*.png, ga_dev_operators_mutation_*.png, ga_dev_operators_selection_*.png
-
-# Operator visualization framework with OpenStreetMap backgrounds
-python ga_operator_visualization.py --visualize-all --save-images  # ✅ COMPLETED
-# Creates: Professional visualizations showing:
-# - Crossover: Parent routes and offspring with proper road-following paths
-# - Mutation: Before/after showing realistic multi-hop road segments
-# - Selection: Tournament, elitism, and diversity strategies
-```
-
-### **Phase 3: Evolution & Optimization (Week 3)** ✅ COMPLETED
-```bash
-# MANDATORY: Unit tests for complete genetic optimizer
-python -m unittest tests.unit.test_genetic_optimizer -v     # ✅ 14 tests passing (100% success rate)
-python -m unittest tests.unit.test_ga_fitness -v            # ✅ 16 tests passing (100% success rate)
-
-# Full evolution test with comprehensive objective testing
-python ga_development_test.py --phase evolution --save-images    # ✅ COMPLETED
-# Creates: Evolution visualizations with fitness progression plots and objective comparisons
-
-# Performance comparison with TSP and comprehensive testing
-python ga_development_test.py --phase comparison --save-images   # ✅ COMPLETED
-# Creates: Professional visualizations showing:
-# - Best routes for each objective (elevation, distance, balanced)
-# - Fitness progression over generations with convergence detection
-# - Objective comparison charts showing fitness vs distance relationships
-```
 
 ### **🚨 MANDATORY UNIT TESTING REQUIREMENTS**
 
@@ -479,30 +293,6 @@ python -m unittest tests.unit.test_ga_performance -v      # 60+ tests - Performa
 - 🚨 **Integration tests** required for multi-component interactions
 - 🚨 **Error handling** must be tested for invalid inputs and edge cases
 
-### **🚨 MANDATORY VISUALIZATION CHECKLIST**
-
-Before each development milestone, generate these verification images:
-
-**✅ Phase 1 - Foundation (COMPLETED):**
-- [x] Initial population routes overlaid on OpenStreetMap
-- [x] Population fitness distribution histogram (shows "No Fitness Data Yet" for gen 0)
-- [x] Route diversity metrics (direction, length, elevation) in statistics table
-- [x] Proper map bounds showing route details (not entire town)
-- [x] Accurate distance calculations (0.29-3.33km ranges demonstrated)
-
-**✅ Phase 2 - Genetic Operators (COMPLETED):**
-- [x] Parent routes before crossover with OpenStreetMap background
-- [x] Offspring routes after crossover showing proper road-following paths
-- [x] Mutation before/after comparison with realistic multi-hop segments
-- [x] Selection pressure visualization (tournament, elitism, diversity)
-- [x] Operator visualization framework with professional quality maps
-
-**✅ Phase 3 - Evolution Engine (COMPLETED):**
-- [x] Fitness evolution over generations with convergence detection and early stopping
-- [x] Best route progression tracking with generation-by-generation fitness improvements
-- [x] Population convergence analysis with diversity metrics and plateau detection
-- [x] Algorithm comparison results showing objective-specific performance differences
-- [x] Evolution visualization framework with fitness progression plots and objective comparison charts
 
 ### **Image Naming Convention:**
 ```
