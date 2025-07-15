@@ -66,9 +66,9 @@ class TestElevationProfiler(unittest.TestCase):
         self.assertIn('distances_km', profile_data)
         self.assertIn('elevation_stats', profile_data)
         
-        # Check coordinates
+        # Check coordinates (includes return to start)
         coordinates = profile_data['coordinates']
-        self.assertEqual(len(coordinates), 5)
+        self.assertEqual(len(coordinates), 6)
         self.assertEqual(coordinates[0]['node_id'], 1001)
         self.assertEqual(coordinates[0]['latitude'], 37.1299)
         self.assertEqual(coordinates[0]['longitude'], -80.4094)
@@ -255,8 +255,8 @@ class TestElevationProfiler(unittest.TestCase):
             elevations = profile_data['elevations']
             distances_km = profile_data['distances_km']
             
-            # Coordinates should match route length
-            self.assertEqual(len(coordinates), 5)
+            # Coordinates should include return to start (route length + 1)
+            self.assertEqual(len(coordinates), 6)
             
             # Elevations should have one extra for return to start
             self.assertEqual(len(elevations), 6)
