@@ -482,7 +482,11 @@ class ElevationProfiler:
                 })
         
         # Create GeoDataFrame
-        route_gdf = gpd.GeoDataFrame(route_data, crs='EPSG:4326')
+        if route_data:
+            route_gdf = gpd.GeoDataFrame(route_data, crs='EPSG:4326')
+        else:
+            # Return empty GeoDataFrame if no valid route data
+            route_gdf = gpd.GeoDataFrame()
         
         if not route_gdf.empty:
             # Add elevation analysis columns
