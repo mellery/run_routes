@@ -171,9 +171,16 @@ class GASensitivityAnalyzer:
         if len(parameter_values) < 2:
             return 0.0
         
+        # Check for zero standard deviation (constant values)
+        param_std = np.std(parameter_values)
+        fitness_std = np.std(fitness_scores)
+        
+        if param_std == 0 or fitness_std == 0:
+            return 0.0  # No sensitivity when values are constant
+        
         # Calculate correlation coefficient
-        param_normalized = (parameter_values - np.mean(parameter_values)) / np.std(parameter_values)
-        fitness_normalized = (np.array(fitness_scores) - np.mean(fitness_scores)) / np.std(fitness_scores)
+        param_normalized = (parameter_values - np.mean(parameter_values)) / param_std
+        fitness_normalized = (np.array(fitness_scores) - np.mean(fitness_scores)) / fitness_std
         
         correlation = np.corrcoef(param_normalized, fitness_normalized)[0, 1]
         
