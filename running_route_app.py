@@ -32,14 +32,14 @@ def initialize_route_services():
     """Initialize and cache route services"""
     try:
         with st.spinner("Initializing route planning services..."):
-            # Create network manager and load graph
-            network_manager = NetworkManager()
+            # Create network manager and load graph (verbose=False for cleaner UI)
+            network_manager = NetworkManager(verbose=False)
             graph = network_manager.load_network(radius_km=2.5)  # Larger default for web interface
-            
+
             if not graph:
                 st.error("Failed to load street network")
                 return None
-            
+
             # Create all services
             services = {
                 'network_manager': network_manager,
@@ -49,11 +49,7 @@ def initialize_route_services():
                 'route_formatter': RouteFormatter(),
                 'graph': graph
             }
-            
-            # Show success message
-            stats = network_manager.get_network_stats(graph)
-            st.success(f"✅ Loaded {stats['nodes']} intersections and {stats['edges']} road segments")
-            
+
             return services
             
     except Exception as e:
@@ -240,7 +236,6 @@ def main():
     
     # Header
     st.title("🏃 Running Route Optimizer")
-    st.markdown("Generate optimized running routes with elevation data for Christiansburg, VA")
     
     # Initialize services
     services = initialize_route_services()
@@ -292,23 +287,8 @@ def main():
     selected_objective = objectives[selected_objective_name]
     
     # Algorithm selection
-    algorithms = route_optimizer.get_available_algorithms()
-    
-    # Find genetic algorithm index
-    default_algorithm_index = 0
-    if "genetic" in algorithms:
-        default_algorithm_index = algorithms.index("genetic")
-    
-    algorithm = st.sidebar.selectbox(
-        "Algorithm",
-        options=algorithms,
-        index=default_algorithm_index,  # Default to genetic if available
-help="Genetic: Advanced genetic algorithm optimization"
-    )
-    
-    # Show algorithm info
-    if algorithm == "genetic":
-        st.sidebar.info("🧬 Genetic Algorithm: Finds creative routes with optimized elevation profiles")
+    # Use genetic algorithm (only supported algorithm)
+    algorithm = "genetic"
     
     # Footway filtering option
     exclude_footways = st.sidebar.checkbox(
