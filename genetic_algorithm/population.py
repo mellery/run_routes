@@ -244,7 +244,7 @@ class PopulationInitializer:
         if not segments:
             return None
 
-        return RouteChromosome(segments, self.graph, self.start_node)
+        return RouteChromosome(segments)
 
     def _create_directional_route(self, target_distance_m: float, direction: str) -> Optional[RouteChromosome]:
         """Create route with directional bias"""
@@ -297,7 +297,7 @@ class PopulationInitializer:
         if not segments:
             return None
 
-        return RouteChromosome(segments, self.graph, self.start_node)
+        return RouteChromosome(segments)
 
     def _create_elevation_focused_route(self, target_distance_m: float) -> Optional[RouteChromosome]:
         """Create route targeting elevation gain"""
@@ -341,7 +341,7 @@ class PopulationInitializer:
         if not segments:
             return None
 
-        return RouteChromosome(segments, self.graph, self.start_node)
+        return RouteChromosome(segments)
 
     def _create_distance_compliant_route(self, target_distance_m: float, sub_strategy: str) -> Optional[RouteChromosome]:
         """Create distance-compliant route using specified sub-strategy"""
@@ -384,7 +384,7 @@ class PopulationInitializer:
                     segments.append(segment)
 
             if segments:
-                return RouteChromosome(segments, self.graph, self.start_node)
+                return RouteChromosome(segments)
         except nx.NetworkXNoPath:
             pass
 
@@ -420,7 +420,7 @@ class PopulationInitializer:
                     segments.append(segment)
 
             if segments:
-                chromosome = RouteChromosome(segments, self.graph, self.start_node)
+                chromosome = RouteChromosome(segments)
                 if min_distance <= chromosome.total_distance <= max_distance:
                     return chromosome
         except nx.NetworkXNoPath:
@@ -458,7 +458,7 @@ class PopulationInitializer:
                     segments.append(segment)
 
             if segments:
-                chromosome = RouteChromosome(segments, self.graph, self.start_node)
+                chromosome = RouteChromosome(segments)
                 if min_distance <= chromosome.total_distance <= max_distance:
                     return chromosome
         except nx.NetworkXNoPath:
@@ -488,7 +488,7 @@ class PopulationInitializer:
                     segments.append(segment)
 
             if segments:
-                return RouteChromosome(segments, self.graph, self.start_node)
+                return RouteChromosome(segments)
         except nx.NetworkXNoPath:
             pass
 
