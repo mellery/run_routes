@@ -58,9 +58,9 @@ class NetworkManager:
         print(f"   Area: {radius_km:.1f}km radius around {self.center_point}")
         
         try:
-            # Use cached graph loader
-            from graph_cache import load_or_generate_graph
-            
+            # Use cached graph loader (refactored to utils.cache)
+            from utils.cache import load_or_generate_graph
+
             graph = load_or_generate_graph(
                 center_point=self.center_point,
                 radius_m=int(radius_km * 1000),
@@ -153,7 +153,7 @@ class NetworkManager:
         if not graph:
             return []
         
-        from route import haversine_distance
+        from utils.geometry import haversine_distance
         
         nearby = []
         radius_m = radius_km * 1000

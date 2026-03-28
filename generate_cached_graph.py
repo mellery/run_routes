@@ -258,44 +258,13 @@ def main():
         help='Force regeneration even if cache exists'
     )
     
-    parser.add_argument(
-        '--enhanced-elevation', '-e',
-        action='store_true',
-        default=True,
-        help='Use enhanced 3DEP elevation data when available (legacy method)'
-    )
-    
-    parser.add_argument(
-        '--no-enhanced-elevation',
-        action='store_true',
-        help='Disable enhanced elevation, use only SRTM data'
-    )
-    
-    parser.add_argument(
-        '--osmnx-elevation',
-        action='store_true',
-        default=True,
-        help='Use OSMnx + 3DEP integration for best accuracy (default: True)'
-    )
-    
-    parser.add_argument(
-        '--no-osmnx-elevation',
-        action='store_true',
-        help='Disable OSMnx elevation integration, use legacy methods'
-    )
-    
     args = parser.parse_args()
-    
-    # Determine elevation modes
-    use_enhanced_elevation = args.enhanced_elevation and not args.no_enhanced_elevation
-    use_osmnx_elevation = args.osmnx_elevation and not args.no_osmnx_elevation
-    
+
     # Print configuration
     print("🔧 Configuration:")
     print(f"   Network type: {args.network_type}")
     print(f"   Radius: {args.radius}m")
-    print(f"   OSMnx elevation: {use_osmnx_elevation}")
-    print(f"   Enhanced elevation (legacy): {use_enhanced_elevation}")
+    print(f"   Elevation: Automatic 3DEP 1m → SRTM 90m fallback")
     
     # Christiansburg, VA coordinates
     center_point = (37.1299, -80.4094)
@@ -316,15 +285,13 @@ def main():
         else:
             print("❌ Existing cache is invalid, regenerating...")
     
-    # Generate new cache
+    # Generate new cache (refactored - uses unified elevation service)
     try:
         generate_cached_graph(
-            center_point, 
-            args.radius, 
-            args.network_type, 
-            cache_file, 
-            use_enhanced_elevation,
-            use_osmnx_elevation
+            center_point,
+            args.radius,
+            args.network_type,
+            cache_file
         )
         print(f"\n🎯 Cache generation complete: {cache_file}")
         
