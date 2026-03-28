@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Unit tests for graph_cache.py cache management utilities
+Unit tests for utils.cache cache management utilities
+(Previously graph_cache.py, refactored into utils/cache.py)
 """
 
 import unittest
@@ -12,10 +13,11 @@ import tempfile
 import shutil
 import subprocess
 
-# Add the parent directory to sys.path to import graph_cache
+# Add the parent directory to sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-import graph_cache
+# Import from refactored utils.cache module
+from utils import cache as graph_cache  # Alias for backward compatibility with test patches
 
 
 class TestGraphCache(unittest.TestCase):

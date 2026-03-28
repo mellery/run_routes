@@ -21,7 +21,6 @@ from genetic_algorithm.optimization import (
     OptimizationResult, AdaptationRule, GAHyperparameterOptimizer, GAParameterTuner,
     GAAlgorithmSelector
 )
-from ga_common_imports import GAStatistics
 
 
 class TestOptimizationEnums(unittest.TestCase):
@@ -484,7 +483,7 @@ class TestGAParameterTuner(unittest.TestCase):
         self.tuner = GAParameterTuner()
         
         # Create mock statistics
-        self.mock_stats = Mock(spec=GAStatistics)
+        self.mock_stats = Mock()  # Mock stats object
         self.mock_stats.generation = 10
         self.mock_stats.diversity_score = 0.5
         self.mock_stats.best_fitness = 0.8
@@ -830,7 +829,7 @@ class TestOptimizationIntegration(unittest.TestCase):
         self.tuner.current_parameters.update(result.best_parameters)
         
         # Test that tuner can work with optimized parameters
-        mock_stats = Mock(spec=GAStatistics)
+        mock_stats = Mock()  # Mock stats object
         mock_stats.generation = 10
         mock_stats.diversity_score = 0.5
         

@@ -16,8 +16,10 @@ import logging
 from typing import List, Tuple, Optional, Dict, Any
 
 from .chromosome import RouteChromosome, RouteSegment
-# NOTE: Removed ga_common_imports dependency (Phase 4 refactoring)
-# These utility functions are now handled internally or via utils modules
+from ga_common_imports import (
+    random_choice_weighted, validate_route_connectivity, 
+    get_route_bounds, calculate_distance
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

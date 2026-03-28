@@ -10,22 +10,23 @@ import pickle
 import time
 import argparse
 import osmnx as ox
-from route import add_elevation_to_graph, add_enhanced_elevation_to_graph, add_elevation_to_edges, add_running_weights
+from utils.graph_utils import add_elevation_to_edges, add_running_weights
+from utils.cache import get_cache_filename
 from osmnx_config import configure_osmnx, get_config
-from osmnx_3dep_integration import add_elevation_hybrid_osmnx
+from utils.elevation import get_elevation_service
 
-def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None, use_enhanced_elevation=True, use_osmnx_elevation=True):
+def generate_cached_graph(center_point, radius_m, network_type='all', cache_file=None):
     """
-    Generate and cache a graph with elevation data
-    
+    Generate and cache a graph with elevation data.
+
+    Uses unified elevation service with automatic 3DEP 1m → SRTM 90m fallback.
+
     Args:
         center_point: (lat, lon) tuple for network center
         radius_m: Network radius in meters
         network_type: OSMnx network type ('all', 'drive', 'walk', 'bike', 'running')
         cache_file: Optional custom cache filename
-        use_enhanced_elevation: Whether to use 3DEP elevation data when available (legacy)
-        use_osmnx_elevation: Whether to use OSMnx + 3DEP integration (recommended)
-    
+
     Returns:
         Processed graph with elevation data
     """
@@ -66,34 +67,27 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
         # Step 2: Add elevation data to nodes
         print("\n2️⃣ Adding elevation data to graph nodes...")
         step_start = time.time()
-        
-        if use_osmnx_elevation:
-            # New OSMnx + 3DEP integration method (recommended)
-            print("   Using OSMnx + 3DEP integration for enhanced accuracy...")
-            graph = add_elevation_hybrid_osmnx(graph, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif')
-            
-        elif use_enhanced_elevation:
-            # Legacy enhanced elevation method
-            print("   Using legacy enhanced elevation method...")
-            graph = add_enhanced_elevation_to_graph(graph, use_3dep=True, fallback_raster='elevation_data/srtm_90m/srtm_20_05.tif')
-            
-            # Add edge grades manually (OSMnx method includes this)
-            print("\n3️⃣ Calculating elevation gain/loss for edges...")
-            graph = add_elevation_to_edges(graph)
-            
+
+        # Use new unified elevation service (3DEP 1m with SRTM 90m fallback)
+        print("   Using unified elevation service (3DEP 1m → SRTM 90m fallback)...")
+        elevation_service = get_elevation_service()
+
+        if not elevation_service.is_available():
+            print("   ⚠️ Warning: No elevation sources available")
         else:
-            # Basic SRTM-only method
-            print("   Using basic SRTM elevation method...")
-            graph = add_elevation_to_graph(graph, 'elevation_data/srtm_90m/srtm_20_05.tif')
-            
-            # Add edge grades manually
-            print("\n3️⃣ Calculating elevation gain/loss for edges...")
-            graph = add_elevation_to_edges(graph)
-        
+            elevation_service.add_elevation_to_graph(graph)
+
         step_time = time.time() - step_start
-        print(f"   ✅ Added elevation data to all nodes and edges ({step_time:.1f}s)")
+        print(f"   ✅ Added elevation data to all nodes ({step_time:.1f}s)")
+
+        # Step 3: Add edge grades
+        print("\n3️⃣ Calculating elevation gain/loss for edges...")
+        step_start = time.time()
+        graph = add_elevation_to_edges(graph)
+        step_time = time.time() - step_start
+        print(f"   ✅ Added elevation data to edges ({step_time:.1f}s)")
         
-        # Step 3: Add running-specific weights
+        # Step 4: Add running-specific weights
         print("\n4️⃣ Adding running-specific weights...")
         step_start = time.time()
         
@@ -120,8 +114,7 @@ def generate_cached_graph(center_point, radius_m, network_type='all', cache_file
             'generated_at': time.time(),
             'nodes_count': len(graph.nodes),
             'edges_count': len(graph.edges),
-            'elevation_file': 'srtm_20_05.tif',
-            'enhanced_elevation': use_enhanced_elevation,
+            'elevation_source': 'unified_service',  # Uses utils.elevation (3DEP + SRTM)
             'elevation_data_quality': {
                 'has_elevation': has_elevation,
                 'elevation_range': elevation_range,
@@ -231,13 +224,6 @@ def load_cached_graph(cache_file):
     except Exception as e:
         print(f"❌ Failed to load cached graph: {e}")
         return None
-
-def get_cache_filename(center_point, radius_m, network_type='all'):
-    """Generate standardized cache filename with cache directory"""
-    lat, lon = center_point
-    # Ensure cache directory exists
-    os.makedirs('cache', exist_ok=True)
-    return f"cache/cached_graph_{lat:.4f}_{lon:.4f}_{radius_m}m_{network_type}.pkl"
 
 def main():
     """Main function for command line usage"""

@@ -6,7 +6,8 @@ Pre-generates commonly used cached graphs for faster application startup
 
 import os
 import sys
-from generate_cached_graph import generate_cached_graph, get_cache_filename
+from generate_cached_graph import generate_cached_graph
+from utils.cache import get_cache_filename
 
 def setup_common_caches():
     """Generate commonly used cache files"""
@@ -64,8 +65,6 @@ def setup_common_caches():
         print("\n📋 Applications will now start much faster:")
         print("   • Web app: streamlit run running_route_app.py")
         print("   • CLI app: python cli_route_planner.py --interactive")
-        print("   • Route demo: python route.py")
-        print("   • TSP test: python quick_tsp_test.py")
         
     elif success_count > 0:
         print(f"⚠️ Partial success: {success_count} caches ready")
@@ -79,27 +78,29 @@ def setup_common_caches():
 
 def verify_setup():
     """Verify the cache setup by testing loading"""
-    
+
     print("\n🧪 Verifying cache setup...")
-    
+
     try:
-        from graph_cache import load_or_generate_graph
-        
+        from utils.cache import load_cached_graph, get_cache_filename
+
         # Test loading a small cache
         print("   Testing 400m drive network...")
-        graph = load_or_generate_graph(
+        cache_file = get_cache_filename(
             center_point=(37.1299, -80.4094),
             radius_m=400,
             network_type='drive'
         )
-        
+
+        graph = load_cached_graph(cache_file)
+
         if graph and len(graph.nodes) > 0:
             print(f"   ✅ Cache loading successful: {len(graph.nodes)} nodes")
             return True
         else:
             print("   ❌ Cache loading returned empty graph")
             return False
-            
+
     except Exception as e:
         print(f"   ❌ Cache loading failed: {e}")
         return False

@@ -71,7 +71,7 @@ class RouteAnalyzer:
         if not route or len(route) < 2:
             return {}
         
-        from route import haversine_distance
+        from utils.geometry import haversine_distance
         
         # Initialize counters
         total_segments = 0
@@ -152,7 +152,7 @@ class RouteAnalyzer:
         route = route_result['route']
         directions = []
         
-        from route import haversine_distance
+        from utils.geometry import haversine_distance
         
         # Start instruction
         if route and route[0] in self.graph.nodes:
@@ -567,7 +567,7 @@ class RouteAnalyzer:
         Returns:
             Distance in meters
         """
-        from route import haversine_distance
+        from utils.geometry import haversine_distance
         return haversine_distance(geom1.y, geom1.x, geom2.y, geom2.x)
     
     def get_route_linestring(self, route: List[int]) -> LineString:

@@ -2,6 +2,12 @@
 """
 Restart Mechanisms for Genetic Algorithm
 Implements convergence detection and population restart strategies to escape local optima
+
+NOTE: This module is tightly integrated with GeneticRouteOptimizer and should be
+considered part of the optimizer implementation. It's kept as a separate file for
+code organization but is not intended as a standalone module.
+
+Used internally by: genetic_algorithm.optimizer.GeneticRouteOptimizer
 """
 
 import random
@@ -12,7 +18,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from .chromosome import RouteChromosome
-from .terrain_aware_initialization import TerrainAwarePopulationInitializer, TerrainAwareConfig
+from .population import PopulationInitializer  # Unified initializer (Phase 2 refactoring)
 
 
 @dataclass
@@ -182,17 +188,17 @@ class RestartMechanisms:
         
         # Initialize convergence detector
         self.convergence_detector = ConvergenceDetector(config)
-        
-        # Initialize terrain-aware generator for exploration
-        terrain_config = TerrainAwareConfig(
-            elevation_gain_threshold=30.0,
-            max_elevation_gain_threshold=60.0,
-            high_elevation_percentage=0.5,
-            very_high_elevation_percentage=0.3,
-            exploration_radius_multiplier=1.8  # Wider exploration during restart
-        )
-        self.terrain_initializer = TerrainAwarePopulationInitializer(
-            graph, start_node, target_distance_km, terrain_config
+
+        # Initialize population generator for exploration (Phase 2 refactored)
+        # Use terrain-aware and elevation-focused strategies during restart
+        self.restart_strategy_mix = {
+            'terrain_aware': 0.4,
+            'elevation_focused': 0.3,
+            'distance_compliant': 0.2,
+            'directional': 0.1
+        }
+        self.population_initializer = PopulationInitializer(
+            graph, start_node, target_distance_km
         )
         
     def check_restart_needed(self, generation: int, population: List[RouteChromosome],
@@ -262,7 +268,9 @@ class RestartMechanisms:
         # Step 6: Fill remaining slots with terrain-aware initialization
         remaining_count = population_size - len(new_population)
         if remaining_count > 0:
-            additional_population = self.terrain_initializer.create_population(remaining_count)
+            additional_population = self.population_initializer.create_population(
+                remaining_count, self.target_distance_km, self.restart_strategy_mix
+            )
             new_population.extend(additional_population)
             print(f"   🏔️  Generated {len(additional_population)} additional terrain-aware routes")
         
@@ -336,7 +344,9 @@ class RestartMechanisms:
         
         if not unexplored_peaks:
             # If no unexplored peaks, generate wider terrain-aware routes
-            return self.terrain_initializer.create_population(count)
+            return self.population_initializer.create_population(
+                count, self.target_distance_km, self.restart_strategy_mix
+            )
         
         # Create routes toward unexplored peaks
         for i in range(count):
@@ -363,15 +373,11 @@ class RestartMechanisms:
             Route chromosome or None if creation fails
         """
         try:
-            # Use terrain initializer's method for consistency
-            target_info = {
-                'node_id': target_node,
-                'elevation': self.graph.nodes[target_node].get('elevation', 0),
-                'elevation_gain': (self.graph.nodes[target_node].get('elevation', 0) - 
-                                 self.graph.nodes[self.start_node].get('elevation', 0))
-            }
-            
-            return self.terrain_initializer._create_route_to_target(target_info, "restart_exploration")
+            # Create a single route using unified population initializer (Phase 2 refactored)
+            population = self.population_initializer.create_population(
+                1, self.target_distance_km, self.restart_strategy_mix
+            )
+            return population[0] if population else None
         except Exception as e:
             print(f"   ⚠️ Failed to create route to target {target_node}: {e}")
             return None

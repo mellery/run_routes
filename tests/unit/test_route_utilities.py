@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Unit tests for route.py core geospatial utility functions
+Unit tests for utils.geometry and utils.graph_utils core geospatial utility functions
+(Previously route.py, refactored into utils/ modules)
 """
 
 import unittest
@@ -11,10 +12,12 @@ import sys
 import os
 import matplotlib.pyplot
 
-# Add the parent directory to sys.path to import route
+# Add the parent directory to sys.path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..'))
 
-import route
+# Import from refactored utils modules
+import utils.geometry as route  # Alias for backward compatibility with test patches
+import utils.graph_utils
 
 
 class TestRouteUtilities(unittest.TestCase):

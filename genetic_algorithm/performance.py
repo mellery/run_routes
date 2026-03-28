@@ -2,6 +2,12 @@
 """
 GA Segment-Level Caching System
 Caches individual route segment properties to accelerate fitness evaluation
+
+NOTE: This module provides GASegmentCache which is used by GeneticRouteOptimizer
+for performance optimization. It's kept as a separate file for code organization
+but is tightly integrated with the optimizer.
+
+Used by: genetic_algorithm.optimizer.GeneticRouteOptimizer
 """
 
 import time

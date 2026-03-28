@@ -2,6 +2,12 @@
 """
 Adaptive Mutation Rate Controller for Genetic Algorithm
 Implements adaptive mutation rates based on convergence detection and diversity metrics
+
+NOTE: This module is tightly integrated with GeneticRouteOptimizer and should be
+considered part of the optimizer implementation. It's kept as a separate file for
+code organization but is not intended as a standalone module.
+
+Used internally by: genetic_algorithm.optimizer.GeneticRouteOptimizer
 """
 
 import math

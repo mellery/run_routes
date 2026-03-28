@@ -19,20 +19,13 @@ from route_services import (
     RouteFormatter
 )
 
-# Import enhanced elevation profiler
-try:
-    from route_services.elevation_profiler_enhanced import EnhancedElevationProfiler
-    ENHANCED_ELEVATION_AVAILABLE = True
-except ImportError:
-    from route_services import ElevationProfiler
-    ENHANCED_ELEVATION_AVAILABLE = False
+# Import unified elevation profiler (refactored Phase 1)
+from route_services.elevation_service import ElevationProfiler
+ENHANCED_ELEVATION_AVAILABLE = True
 
-# Import elevation data sources for configuration
-try:
-    from elevation_data_sources import get_elevation_manager, ElevationConfig
-    ELEVATION_SOURCES_AVAILABLE = True
-except ImportError:
-    ELEVATION_SOURCES_AVAILABLE = False
+# Import elevation service (refactored Phase 1)
+from utils.elevation import get_elevation_service, ElevationService
+ELEVATION_SOURCES_AVAILABLE = True
 
 
 def ensure_output_directory():
@@ -68,15 +61,15 @@ class RefactoredCLIRoutePlanner:
     """Enhanced command line interface with 3DEP elevation support"""
     
     def __init__(self, elevation_config_path=None):
-        """Initialize the CLI route planner with enhanced elevation support
-        
+        """Initialize the CLI route planner with unified elevation service
+
         Args:
-            elevation_config_path: Optional path to elevation configuration file
+            elevation_config_path: [DEPRECATED] No longer used - elevation service auto-configures
         """
         self.services = None
         self.selected_start_node = None  # Will be dynamically determined from coordinates (37.13095, -80.40749)
-        self.elevation_config_path = elevation_config_path
-        self.elevation_manager = None
+        self.elevation_config_path = elevation_config_path  # Kept for backward compatibility
+        self.elevation_service = None  # Unified elevation service (Phase 1 refactored)
         self.preferred_elevation_source = None
         self.verbose = False  # Debug output flag
         self.output_dir = ensure_output_directory()  # Set output directory
@@ -102,23 +95,19 @@ class RefactoredCLIRoutePlanner:
                 print("❌ Failed to load street network")
                 return False
             
-            # Initialize elevation management
+            # Initialize unified elevation service (Phase 1 refactored)
             if ELEVATION_SOURCES_AVAILABLE:
                 try:
-                    self.elevation_manager = get_elevation_manager(self.elevation_config_path)
-                    elevation_source = self.elevation_manager.get_elevation_source()
-                    if elevation_source:
-                        print(f"📊 Enhanced elevation: {elevation_source.get_resolution()}m resolution available")
+                    self.elevation_service = get_elevation_service()
+                    if self.elevation_service.is_available():
+                        resolution = self.elevation_service.active_source.get_resolution() if self.elevation_service.active_source else "unknown"
+                        print(f"📊 Elevation service: {resolution}m resolution available")
                 except Exception as e:
-                    print(f"⚠️ Enhanced elevation initialization failed: {e}")
-            
-            # Create all services with enhanced elevation support (suppress duplicate messages)
-            route_optimizer = RouteOptimizer(graph, self.elevation_config_path, verbose=False)
-            
-            if ENHANCED_ELEVATION_AVAILABLE:
-                elevation_profiler = EnhancedElevationProfiler(graph, self.elevation_config_path, verbose=False)
-            else:
-                elevation_profiler = ElevationProfiler(graph)
+                    print(f"⚠️ Elevation service initialization failed: {e}")
+
+            # Create all services using refactored architecture
+            route_optimizer = RouteOptimizer(graph, verbose=False)
+            elevation_profiler = ElevationProfiler(graph)
             
             self.services = {
                 'network_manager': network_manager,
@@ -163,7 +152,7 @@ class RefactoredCLIRoutePlanner:
         
         # Convert to same format as nearby_nodes for compatibility
         nearby_nodes = []
-        from route import haversine_distance
+        from utils.geometry import haversine_distance
         for node_id, data in all_intersections:
             distance = haversine_distance(center_point[0], center_point[1], data['y'], data['x'])
             nearby_nodes.append((node_id, distance, data))
@@ -350,103 +339,72 @@ class RefactoredCLIRoutePlanner:
             return
         
         try:
-            if not self.elevation_manager:
-                self.elevation_manager = get_elevation_manager(self.elevation_config_path)
-            
+            if not self.elevation_service:
+                self.elevation_service = get_elevation_service()
+
             print("\n📊 Elevation Data Source Status")
             print("=" * 40)
-            
-            # Show available sources
-            available_sources = self.elevation_manager.get_available_sources()
-            print(f"Available sources: {available_sources}")
-            
+
             # Show active source
-            active_source = self.elevation_manager.get_elevation_source()
-            if active_source:
-                source_info = active_source.get_source_info()
-                print(f"Active source: {source_info.get('type', 'Unknown')}")
+            if self.elevation_service.is_available() and self.elevation_service.active_source:
+                active_source = self.elevation_service.active_source
+                source_type = type(active_source).__name__
+                print(f"Active source: {source_type}")
                 print(f"Resolution: {active_source.get_resolution()}m")
-                
-                # Show coverage
-                bounds = active_source.get_coverage_bounds()
-                print(f"Coverage: {bounds}")
-                
+
                 # Show hybrid source statistics if available
-                if hasattr(active_source, 'get_stats'):
-                    stats = active_source.get_stats()
-                    if stats and 'primary_queries' in stats:
-                        total_queries = sum(stats[k] for k in ['primary_queries', 'fallback_queries', 'failed_queries'])
-                        if total_queries > 0:
-                            print(f"\nUsage Statistics:")
-                            print(f"  High-resolution queries: {stats['primary_percentage']:.1f}%")
-                            print(f"  Fallback queries: {stats['fallback_percentage']:.1f}%")
-                            print(f"  Failed queries: {stats['failure_percentage']:.1f}%")
-                
-                # Show enhanced caching statistics if available
-                if hasattr(active_source, 'get_cache_stats'):
-                    cache_stats = active_source.get_cache_stats()
-                    if cache_stats and 'query_performance' in cache_stats:
-                        perf = cache_stats['query_performance']
-                        print(f"\nCaching Performance:")
-                        print(f"  Total queries: {perf['total_queries']}")
-                        print(f"  Cache hit rate: {perf['cache_hit_rate_percent']:.1f}%")
-                        print(f"  Average query time: {perf['avg_query_time_ms']:.2f}ms")
-                        
-                        if 'lru_cache' in cache_stats:
-                            lru = cache_stats['lru_cache']
-                            print(f"  Memory cache: {lru['size']}/{lru['max_size']} entries")
-                        
-                        if 'spatial_index' in cache_stats:
-                            spatial = cache_stats['spatial_index']
-                            print(f"  Spatial index: {spatial['indexed_tiles']} tiles ({spatial['total_size_mb']}MB)")
+                stats = self.elevation_service.get_stats()
+                if stats and 'primary_queries' in stats:
+                    total_queries = sum(stats[k] for k in ['primary_queries', 'fallback_queries', 'failed_queries'])
+                    if total_queries > 0:
+                        print(f"\nUsage Statistics:")
+                        print(f"  High-resolution queries: {stats['primary_percentage']:.1f}%")
+                        print(f"  Fallback queries: {stats['fallback_percentage']:.1f}%")
+                        print(f"  Failed queries: {stats['failure_percentage']:.1f}%")
             else:
-                print("❌ No active elevation source")
-            
+                print("❌ No elevation source available")
+
             # Test elevation access
             test_lat, test_lon = 37.1299, -80.4094  # Christiansburg, VA
-            test_results = self.elevation_manager.test_sources(test_lat, test_lon)
-            
+            test_elevation = self.elevation_service.get_elevation(test_lat, test_lon)
+
             print(f"\nElevation Test at ({test_lat}, {test_lon}):")
-            for source_name, result in test_results.items():
-                status = "✅" if result['available'] and result['elevation'] else "❌"
-                elevation = f"{result['elevation']:.1f}m" if result['elevation'] else "N/A"
-                resolution = f"{result['resolution']:.1f}m" if 'resolution' in result else "N/A"
-                print(f"  {status} {source_name}: {elevation} (res: {resolution})")
+            if test_elevation is not None:
+                print(f"  ✅ Elevation: {test_elevation:.1f}m")
+            else:
+                print(f"  ❌ Failed to get elevation")
             
         except Exception as e:
             print(f"❌ Failed to get elevation status: {e}")
     
     def configure_elevation_source(self, preferred_source=None):
         """Configure elevation data source preferences
-        
+
+        Note: In refactored architecture (Phase 1), elevation service auto-configures
+        with 3DEP → SRTM fallback. Manual configuration is no longer needed.
+
         Args:
-            preferred_source: Preferred source name ('3dep_local', 'srtm', 'hybrid')
+            preferred_source: [DEPRECATED] No longer used - automatic fallback
         """
         if not ELEVATION_SOURCES_AVAILABLE:
-            print("❌ Enhanced elevation system not available")
+            print("❌ Elevation system not available")
             return
-        
+
         try:
-            # Create or load configuration
-            config = ElevationConfig()
-            if self.elevation_config_path and os.path.exists(self.elevation_config_path):
-                config = ElevationConfig.from_file(self.elevation_config_path)
-            
-            if preferred_source:
-                config.preferred_source = preferred_source
-                print(f"✅ Set preferred elevation source to: {preferred_source}")
-            
-            # Save configuration
-            config_path = self.elevation_config_path or "elevation_config.json"
-            config.to_file(config_path)
-            print(f"✅ Saved elevation configuration to: {config_path}")
-            
-            # Reinitialize elevation manager
-            self.elevation_manager = get_elevation_manager(config_path)
-            print("✅ Elevation configuration updated")
-            
+            if not self.elevation_service:
+                self.elevation_service = get_elevation_service()
+
+            print("ℹ️  Elevation service uses automatic configuration:")
+            print("    Priority: 3DEP 1m → SRTM 90m fallback")
+            print("    No manual configuration needed")
+
+            if self.elevation_service.is_available():
+                source_type = type(self.elevation_service.active_source).__name__
+                resolution = self.elevation_service.active_source.get_resolution()
+                print(f"    Active source: {source_type} ({resolution}m)")
+
         except Exception as e:
-            print(f"❌ Failed to configure elevation source: {e}")
+            print(f"❌ Failed to get elevation status: {e}")
     
     def display_route_stats(self, route_result):
         """Display route statistics using formatter

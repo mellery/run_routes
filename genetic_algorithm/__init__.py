@@ -2,84 +2,49 @@
 """
 Genetic Algorithm Package
 Consolidated genetic algorithm implementation for route optimization
+
+This package provides a complete genetic algorithm implementation for optimizing
+running routes. The main entry point is GeneticRouteOptimizer.
+
+Basic usage:
+    from genetic_algorithm import GeneticRouteOptimizer, FitnessObjective
+
+    optimizer = GeneticRouteOptimizer(graph)
+    result = optimizer.optimize(
+        start_node=1529188403,
+        distance_km=5.0,
+        objective=FitnessObjective.MAXIMIZE_ELEVATION
+    )
 """
 
-# Core components
+# Core components - These are the main public API
 from .chromosome import RouteSegment, RouteChromosome
 from .population import PopulationInitializer
 from .optimizer import GeneticRouteOptimizer
-
-# Fitness evaluation
 from .fitness import GAFitnessEvaluator, FitnessObjective
+from .operators import GAOperators
 
-# Performance optimization
-from .performance import GASegmentCache, get_global_segment_cache
+# Optional components - Import these explicitly if needed
+# from .performance import GASegmentCache
+# from .visualization import GAVisualizer
+# from .analysis import GAConfigManager
+# from .optimization import GAHyperparameterOptimizer
 
-# Visualization
-from .visualization import GAVisualizer, GATuningVisualizer, PrecisionComparisonVisualizer
+__version__ = "2.0.0"  # Incremented for Phase 3 refactoring
+__author__ = "Route Optimization Team"
 
-# Genetic operators
-from .operators import GAOperators, PrecisionAwareCrossover, PrecisionAwareMutation
-
-# Analysis components
-from .analysis import GAConfigManager, GASensitivityAnalyzer, SensitivityResult
-
-# Optimization components
-from .optimization import (
-    GAHyperparameterOptimizer, GAParameterTuner, GAAlgorithmSelector,
-    OptimizationMethod, AdaptationStrategy, HyperparameterSpace, OptimizationResult
-)
-
-# Common utilities
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from ga_common_imports import GAConfiguration, GAStatistics, GAPerformanceMonitor
-
-__version__ = "1.0.0"
-__author__ = "GA Route Optimization Team"
-
+# Export only core classes for clean API
 __all__ = [
-    # Core
+    # Core chromosome and optimization
     'RouteSegment',
-    'RouteChromosome', 
+    'RouteChromosome',
     'GeneticRouteOptimizer',
+
+    # Population and operators
     'PopulationInitializer',
-    
-    # Fitness
+    'GAOperators',
+
+    # Fitness evaluation
     'GAFitnessEvaluator',
     'FitnessObjective',
-    
-    # Performance
-    'GASegmentCache',
-    'get_global_segment_cache',
-    
-    # Visualization
-    'GAVisualizer',
-    'GATuningVisualizer',
-    'PrecisionComparisonVisualizer',
-    
-    # Operators
-    'GAOperators',
-    'PrecisionAwareCrossover',
-    'PrecisionAwareMutation',
-    
-    # Optimization
-    'GAHyperparameterOptimizer',
-    'GAParameterTuner',
-    'GAAlgorithmSelector',
-    'OptimizationMethod',
-    'AdaptationStrategy',
-    'HyperparameterSpace',
-    'OptimizationResult',
-    
-    # Analysis
-    'GAConfigManager',
-    'GASensitivityAnalyzer',
-    'SensitivityResult',
-    
-    # Configuration
-    'GAConfiguration',
-    'GAStatistics',
-    'GAPerformanceMonitor',
 ]

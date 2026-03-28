@@ -6,13 +6,23 @@ Implements segment-based route representation for GA optimization
 
 import sys
 import os
+import math
+import time
+from typing import List, Optional, Tuple, Dict, Any
+
+import networkx as nx
+import numpy as np
+
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from ga_common_imports import (
-    math, time, List, Optional, Tuple, Dict, Any, nx, np,
-    calculate_distance, validate_route_connectivity, calculate_route_statistics,
-    GAError, InvalidChromosomeError
-)
+# Custom exceptions for GA operations
+class GAError(Exception):
+    """Base exception for GA operations"""
+    pass
+
+class InvalidChromosomeError(GAError):
+    """Exception for invalid chromosome operations"""
+    pass
 
 
 class RouteSegment:

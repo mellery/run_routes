@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 
 from .chromosome import RouteChromosome
 from .population import PopulationInitializer
-from .distance_compliant_population import DistanceCompliantPopulationInitializer
-from .terrain_aware_initialization import TerrainAwarePopulationInitializer, TerrainAwareConfig
 from .operators import GAOperators
 from .constraint_preserving_operators import ConstraintPreservingOperators, RouteConstraints
 from .fitness import GAFitnessEvaluator, FitnessObjective
@@ -245,7 +243,7 @@ class GeneticRouteOptimizer:
             print(f"👥 Initializing population...")
         
         population = self.population_initializer.create_population(
-            self.config.population_size, distance_km
+            self.config.population_size, distance_km, self.strategy_mix
         )
         
         if not population:
@@ -459,26 +457,33 @@ class GeneticRouteOptimizer:
             if self.config.verbose:
                 print("🏔️  Using terrain-aware population initialization")
             
-            # Create terrain-aware config
-            terrain_config = TerrainAwareConfig(
-                elevation_gain_threshold=self.config.terrain_elevation_gain_threshold,
-                max_elevation_gain_threshold=self.config.terrain_max_elevation_gain_threshold,
-                high_elevation_percentage=self.config.terrain_high_elevation_percentage,
-                very_high_elevation_percentage=self.config.terrain_very_high_elevation_percentage
-            )
-            
-            self.population_initializer = TerrainAwarePopulationInitializer(
-                self.graph, start_node, distance_km, terrain_config
-            )
-            
+            # Configure strategy mix for terrain-aware initialization
+            strategy_mix = {
+                'terrain_aware': 0.5,
+                'elevation_focused': 0.3,
+                'distance_compliant': 0.2
+            }
+
         elif self.config.use_distance_compliant_initialization:
             if self.config.verbose:
                 print("🎯 Using distance-compliant population initialization")
-            self.population_initializer = DistanceCompliantPopulationInitializer(self.graph, start_node, distance_km * 1.2)  # 20% buffer
+            # Configure strategy mix for distance-compliant initialization
+            strategy_mix = {
+                'distance_compliant': 0.6,
+                'random_walk': 0.2,
+                'elevation_focused': 0.2
+            }
         else:
             if self.config.verbose:
                 print("🎲 Using traditional population initialization")
-            self.population_initializer = PopulationInitializer(self.graph, start_node, self.config.allow_bidirectional_segments)
+            # Use default strategy mix
+            strategy_mix = None
+
+        # Create unified population initializer
+        self.population_initializer = PopulationInitializer(
+            self.graph, start_node, self.config.allow_bidirectional_segments
+        )
+        self.strategy_mix = strategy_mix
         
         # Initialize fitness evaluator with segment cache
         self.fitness_evaluator = GAFitnessEvaluator(
@@ -850,7 +855,7 @@ class GeneticRouteOptimizer:
             # Generate new chromosomes to maintain population size
             try:
                 new_chromosomes = self.population_initializer.create_population(
-                    needed, self.fitness_evaluator.target_distance_km
+                    needed, self.fitness_evaluator.target_distance_km, self.strategy_mix
                 )
                 
                 if new_chromosomes:

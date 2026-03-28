@@ -320,42 +320,27 @@ help="Genetic: Advanced genetic algorithm optimization"
     # Elevation Data Source Selection
     st.sidebar.markdown("### Elevation Data")
     
-    # Try to import elevation sources
+    # Show elevation service status (Phase 1 refactored - auto-configuration)
     try:
-        from elevation_data_sources import get_elevation_manager
-        
-        elevation_manager = get_elevation_manager()
-        available_sources = elevation_manager.get_available_sources()
-        
-        if available_sources:
-            # Add "auto" option
-            source_options = ["auto"] + available_sources
-            elevation_source = st.sidebar.selectbox(
-                "Data Source",
-                options=source_options,
-                index=0,  # Default to auto
-                help="Choose elevation data source (auto = best available)"
-            )
-            
-            # Show source status
-            active_source = elevation_manager.get_elevation_source()
-            if active_source:
-                source_info = active_source.get_source_info()
-                resolution = active_source.get_resolution()
-                st.sidebar.info(f"📊 Active: {source_info.get('type', 'Unknown')} ({resolution}m resolution)")
-                
-                # Show caching status if available
-                if hasattr(active_source, 'get_cache_stats'):
-                    if st.sidebar.button("📈 Show Cache Stats"):
-                        cache_stats = active_source.get_cache_stats()
-                        if cache_stats.get('enhanced_caching'):
-                            perf = cache_stats.get('query_performance', {})
-                            st.sidebar.text(f"Cache hits: {perf.get('cache_hit_rate_percent', 0):.1f}%")
-            else:
-                st.sidebar.warning("⚠️ No elevation source active")
+        from utils.elevation import get_elevation_service
+
+        elevation_service = get_elevation_service()
+
+        if elevation_service.is_available() and elevation_service.active_source:
+            # Show active source status
+            active_source = elevation_service.active_source
+            source_type = type(active_source).__name__
+            resolution = active_source.get_resolution()
+            st.sidebar.info(f"📊 Active: {source_type} ({resolution}m resolution)")
+
+            # Show usage statistics if available (for hybrid sources)
+            stats = elevation_service.get_stats()
+            if stats and st.sidebar.button("📈 Show Usage Stats"):
+                if 'primary_percentage' in stats:
+                    st.sidebar.text(f"High-res: {stats['primary_percentage']:.1f}%")
+                    st.sidebar.text(f"Fallback: {stats['fallback_percentage']:.1f}%")
         else:
-            st.sidebar.warning("⚠️ No elevation sources available")
-            elevation_source = "auto"
+            st.sidebar.warning("⚠️ No elevation source active")
             
     except ImportError:
         st.sidebar.info("📊 Using basic elevation data")

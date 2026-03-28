@@ -2,6 +2,18 @@
 """
 Genetic Algorithm Analysis Components
 Consolidated sensitivity analysis and configuration management
+
+NOTE: This is an optional analysis module for debugging and performance profiling.
+It's not required for basic GA operation. The core optimizer provides built-in
+statistics and logging.
+
+This module provides advanced features for:
+- Detailed population analysis
+- Convergence diagnostics
+- Performance profiling
+- Algorithm comparison
+
+For basic route statistics, use route_services.route_analyzer.RouteAnalyzer instead.
 """
 
 import sys
@@ -10,16 +22,42 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import json
 import time
+import logging
 import numpy as np
 from typing import Dict, Any, List, Optional, Tuple
 from dataclasses import dataclass
 from pathlib import Path
 
-from ga_common_imports import (
-    GAConfiguration, GAStatistics, GAPerformanceMonitor,
-    get_logger, DEFAULT_POPULATION_SIZE, DEFAULT_MAX_GENERATIONS,
-    DEFAULT_MUTATION_RATE, DEFAULT_CROSSOVER_RATE
-)
+# Constants (Phase 4 refactoring - moved from ga_common_imports)
+DEFAULT_POPULATION_SIZE = 100
+DEFAULT_MAX_GENERATIONS = 200
+DEFAULT_MUTATION_RATE = 0.15
+DEFAULT_CROSSOVER_RATE = 0.8
+
+def get_logger(name):
+    """Get logger instance"""
+    return logging.getLogger(name)
+
+# Stub classes for removed dependencies (Phase 4 refactoring)
+@dataclass
+class GAConfiguration:
+    """GA configuration parameters"""
+    population_size: int = DEFAULT_POPULATION_SIZE
+    max_generations: int = DEFAULT_MAX_GENERATIONS
+    mutation_rate: float = DEFAULT_MUTATION_RATE
+    crossover_rate: float = DEFAULT_CROSSOVER_RATE
+
+class GAStatistics:
+    """GA statistics tracker"""
+    def __init__(self):
+        self.generations = []
+        self.best_fitness = []
+
+class GAPerformanceMonitor:
+    """GA performance monitor"""
+    def __init__(self):
+        self.start_time = time.time()
+        self.metrics = {}
 
 
 @dataclass

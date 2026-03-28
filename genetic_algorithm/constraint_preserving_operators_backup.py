@@ -2,22 +2,7 @@
 """
 Constraint-Preserving Genetic Algorithm Operators
 Implements crossover and mutation that preserve distance and connectivity constraints
-
-NOTE: This file is kept for backward compatibility but should be considered part of
-the unified operators module. The main GAOperators class in operators.py provides
-similar functionality. Future consolidation may merge these completely.
-
-For new code, prefer using genetic_algorithm.operators.GAOperators which provides
-both standard and constraint-preserving operations.
 """
-
-import warnings
-warnings.warn(
-    "constraint_preserving_operators.py is maintained for compatibility. "
-    "Consider using genetic_algorithm.operators.GAOperators for new code.",
-    PendingDeprecationWarning,
-    stacklevel=2
-)
 
 import random
 import math

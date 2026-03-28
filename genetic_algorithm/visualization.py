@@ -2,19 +2,66 @@
 """
 Genetic Algorithm Visualization Components
 Consolidated visualization functionality for GA development, tuning, and precision analysis
+
+NOTE: This is an optional visualization module for GA development and debugging.
+It's not required for basic GA operation. Visualizations are conditionally imported
+when needed.
+
+This module provides:
+- Population visualization with OpenStreetMap backgrounds
+- Fitness evolution plots
+- Route comparison visualizations
+- Precision comparison tools
+
+For production route visualization, use the route_services visualization tools or
+the Streamlit web interface instead.
 """
 
 import sys
 import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
-from ga_common_imports import (
-    os, time, math, datetime, random, List, Optional, Dict, Any, Tuple,
-    np, nx, plt, patches, LinearSegmentedColormap, dataclass
-)
+import os
+import time
+import math
+import datetime
+import random
+from typing import List, Optional, Dict, Any, Tuple
+from dataclasses import dataclass
 
-from ga_base_visualizer import BaseGAVisualizer, VisualizationConfig, GAVisualizationUtils
+import numpy as np
+import networkx as nx
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from matplotlib.colors import LinearSegmentedColormap
+
 from .chromosome import RouteChromosome, RouteSegment
+
+# Stub classes for removed dependencies (Phase 4 refactoring)
+@dataclass
+class VisualizationConfig:
+    """Configuration for visualization"""
+    output_dir: str = "visualizations"
+    figsize: tuple = (15, 10)
+    dpi: int = 150
+
+class BaseGAVisualizer:
+    """Base class for GA visualizers"""
+    def __init__(self, graph=None, config=None):
+        self.graph = graph
+        self.config = config or VisualizationConfig()
+
+class GAVisualizationUtils:
+    """Visualization utilities"""
+    @staticmethod
+    def calculate_graph_bounds(graph):
+        """Calculate bounds for graph visualization"""
+        lats = [graph.nodes[n]['y'] for n in graph.nodes()]
+        lons = [graph.nodes[n]['x'] for n in graph.nodes()]
+        return {
+            'min_lat': min(lats), 'max_lat': max(lats),
+            'min_lon': min(lons), 'max_lon': max(lons)
+        }
 
 # Import optional dependencies
 try:

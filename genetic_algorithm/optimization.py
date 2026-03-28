@@ -2,6 +2,15 @@
 """
 Genetic Algorithm Optimization Components
 Consolidated hyperparameter optimization, parameter tuning, and algorithm selection
+
+NOTE: This is an optional module for hyperparameter tuning and algorithm selection.
+It's not required for basic GA operation. Most users should use the default parameters
+in GeneticRouteOptimizer.
+
+This module provides advanced features for:
+- Hyperparameter optimization (grid search, random search, bayesian optimization)
+- Automated parameter tuning
+- Algorithm comparison and selection
 """
 
 import sys
@@ -10,6 +19,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 import time
 import math
+import logging
 import numpy as np
 import random
 import json
@@ -20,10 +30,26 @@ import itertools
 from concurrent.futures import ProcessPoolExecutor, as_completed
 import multiprocessing as mp
 
-from ga_common_imports import (
-    GAConfiguration, GAStatistics, GAPerformanceMonitor,
-    get_logger, validate_graph, normalize_fitness
-)
+def get_logger(name):
+    """Get logger instance"""
+    return logging.getLogger(name)
+
+def validate_graph(graph):
+    """Validate graph structure"""
+    return graph is not None and len(graph.nodes()) > 0
+
+def normalize_fitness(fitness_values):
+    """Normalize fitness values to 0-1 range"""
+    if not fitness_values:
+        return []
+    min_val = min(fitness_values)
+    max_val = max(fitness_values)
+    if max_val == min_val:
+        return [1.0] * len(fitness_values)
+    return [(v - min_val) / (max_val - min_val) for v in fitness_values]
+
+# Import stub classes from analysis module
+from .analysis import GAConfiguration, GAStatistics, GAPerformanceMonitor
 
 
 class OptimizationMethod(Enum):
