@@ -172,7 +172,8 @@ class LocalThreeDEPSource(ElevationDataSource):
         self.resolution = 1.0  # meters
         self.tile_index = {}
         self.spatial_index = {}  # Grid-based spatial index for fast tile lookup
-        self.grid_size = 0.01  # Grid cell size in degrees (~1km)
+        self.grid_size = None  # Will be set based on CRS (1000m for UTM, 0.01° for lat/lon)
+        self.tile_crs = None  # Will be set from first tile
         self.open_files = {}  # Cache for opened rasterio files
         self.file_access_order = []  # LRU tracking for file cache
         self.max_open_files = 50  # LRU cache limit
@@ -193,6 +194,20 @@ class LocalThreeDEPSource(ElevationDataSource):
                 with open(index_file, 'r') as f:
                     self.tile_index = json.load(f)
                 logger.debug(f"Loaded tile index with {len(self.tile_index)} tiles")
+
+                # Set tile CRS from first tile
+                if self.tile_index:
+                    first_tile_info = next(iter(self.tile_index.values()))
+                    self.tile_crs = first_tile_info.get('crs', 'EPSG:4326')
+                    # Set appropriate grid size based on CRS
+                    # For projected CRS (meters): 1000m cells (~1km)
+                    # For geographic CRS (degrees): 0.01° cells (~1km)
+                    self.grid_size = 1000.0 if 'EPSG:4326' not in self.tile_crs else 0.01
+                    logger.debug(f"Tile CRS: {self.tile_crs}, grid_size: {self.grid_size}")
+
+                    # Build spatial index for fast lookups
+                    self._build_spatial_index()
+
             except Exception as e:
                 logger.warning(f"Failed to load tile index: {e}")
                 self._rebuild_tile_index()
@@ -223,6 +238,16 @@ class LocalThreeDEPSource(ElevationDataSource):
             except Exception as e:
                 logger.warning(f"Failed to index tile {tile_file}: {e}")
 
+        # Set tile CRS from first tile
+        if self.tile_index:
+            first_tile_info = next(iter(self.tile_index.values()))
+            self.tile_crs = first_tile_info.get('crs', 'EPSG:4326')
+            # Set appropriate grid size based on CRS
+            # For projected CRS (meters): 1000m cells (~1km)
+            # For geographic CRS (degrees): 0.01° cells (~1km)
+            self.grid_size = 1000.0 if 'EPSG:4326' not in self.tile_crs else 0.01
+            logger.info(f"Tile CRS: {self.tile_crs}, grid_size: {self.grid_size}")
+
         # Save index
         index_file = self.index_dir / "tile_index.json"
         try:
@@ -237,6 +262,10 @@ class LocalThreeDEPSource(ElevationDataSource):
 
     def _build_spatial_index(self):
         """Build spatial grid index for fast tile lookups"""
+        if not self.grid_size:
+            logger.warning("Grid size not set, cannot build spatial index")
+            return
+
         logger.info("Building spatial index for tile lookups...")
         self.spatial_index = {}
 
@@ -261,7 +290,22 @@ class LocalThreeDEPSource(ElevationDataSource):
         logger.info(f"Spatial index built with {len(self.spatial_index)} grid cells")
 
     def _get_grid_key(self, lat: float, lon: float) -> Tuple[int, int]:
-        """Get grid key for coordinate"""
+        """Get grid key for coordinate (transforms to tile CRS first)"""
+        if not self.grid_size:
+            # Fallback if grid_size not set
+            return (int(lat * 100), int(lon * 100))
+
+        # If tiles are in a projected CRS (like UTM), transform coordinates
+        if self.tile_crs and self.tile_crs != 'EPSG:4326':
+            transformer = self._get_transformer('EPSG:4326', self.tile_crs)
+            if transformer:
+                # Transform lon, lat -> x, y in tile CRS
+                x, y = transformer.transform(lon, lat)
+                col = int(x / self.grid_size)
+                row = int(y / self.grid_size)
+                return (row, col)
+
+        # Fallback to lat/lon if no transformation needed
         row = int(lat / self.grid_size)
         col = int(lon / self.grid_size)
         return (row, col)

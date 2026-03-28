@@ -55,7 +55,11 @@ class GAConfig:
     
     # Segment usage constraints
     allow_bidirectional_segments: bool = True  # Allow using segments in both directions
-    
+
+    # Route type constraints
+    require_circular: bool = True  # Require route to return to start
+    route_type: str = "loop"  # Route type: "loop", "out_and_back", "point_to_point"
+
     # Constraint-preserving operators
     use_constraint_preserving_operators: bool = True  # Use constraint-preserving crossover/mutation
     
@@ -481,15 +485,16 @@ class GeneticRouteOptimizer:
 
         # Create unified population initializer
         self.population_initializer = PopulationInitializer(
-            self.graph, start_node, self.config.allow_bidirectional_segments
+            self.graph, start_node, self.config.allow_bidirectional_segments, self.config.require_circular
         )
         self.strategy_mix = strategy_mix
-        
+
         # Initialize fitness evaluator with segment cache
         self.fitness_evaluator = GAFitnessEvaluator(
-            objective, distance_km, self.segment_cache, 
-            enable_micro_terrain=True, 
-            allow_bidirectional_segments=self.config.allow_bidirectional_segments
+            objective, distance_km, self.segment_cache,
+            enable_micro_terrain=True,
+            allow_bidirectional_segments=self.config.allow_bidirectional_segments,
+            require_circular=self.config.require_circular
         )
         
         # Initialize constraint-preserving operators if enabled

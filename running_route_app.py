@@ -27,14 +27,40 @@ st.set_page_config(
 )
 
 
+def get_required_radius(target_distance_km: float) -> float:
+    """Determine required network radius for target route distance
+
+    Args:
+        target_distance_km: Target route distance in kilometers
+
+    Returns:
+        Required network radius in kilometers
+    """
+    if target_distance_km <= 5.0:
+        return 2.5  # 2.5km radius for short routes
+    elif target_distance_km <= 12.0:
+        return 5.0  # 5km radius for medium routes
+    elif target_distance_km <= 20.0:
+        return 8.0  # 8km radius for long routes
+    else:
+        return 10.0  # 10km radius for very long routes
+
+
 @st.cache_resource
-def initialize_route_services():
-    """Initialize and cache route services"""
+def initialize_route_services(radius_km: float):
+    """Initialize and cache route services for a specific network radius
+
+    Args:
+        radius_km: Network radius in kilometers
+
+    Returns:
+        Dictionary of initialized services
+    """
     try:
-        with st.spinner("Initializing route planning services..."):
+        with st.spinner(f"Loading street network ({radius_km}km radius)..."):
             # Create network manager and load graph (verbose=False for cleaner UI)
             network_manager = NetworkManager(verbose=False)
-            graph = network_manager.load_network(radius_km=2.5)  # Larger default for web interface
+            graph = network_manager.load_network(radius_km=radius_km)
 
             if not graph:
                 st.error("Failed to load street network")
@@ -47,11 +73,12 @@ def initialize_route_services():
                 'route_analyzer': RouteAnalyzer(graph),
                 'elevation_profiler': ElevationProfiler(graph),
                 'route_formatter': RouteFormatter(),
-                'graph': graph
+                'graph': graph,
+                'radius_km': radius_km  # Track current radius
             }
 
             return services
-            
+
     except Exception as e:
         st.error(f"Failed to initialize services: {e}")
         return None
@@ -233,26 +260,15 @@ def create_elevation_plot(services, route_result):
 
 def main():
     """Main Streamlit app using refactored services"""
-    
+
     # Header
     st.title("🏃 Running Route Optimizer")
-    
-    # Initialize services
-    services = initialize_route_services()
-    
-    if not services:
-        st.error("❌ Failed to initialize route services. Please refresh the page.")
-        return
-    
-    # Get service instances
-    network_manager = services['network_manager']
-    route_optimizer = services['route_optimizer']
-    route_analyzer = services['route_analyzer']
-    elevation_profiler = services['elevation_profiler']
-    route_formatter = services['route_formatter']
-    graph = services['graph']
-    
-    # Sidebar controls
+
+    # Initialize session state for tracking current radius
+    if 'current_radius' not in st.session_state:
+        st.session_state.current_radius = 2.5  # Start with small network
+
+    # Sidebar controls (read distance first to determine network size)
     st.sidebar.header("Route Parameters")
 
     # Target distance
@@ -262,13 +278,41 @@ def main():
         max_value=25.0,
         value=5.0,
         step=0.1,
-        help="Desired route distance (±20% tolerance). Routes >8km will automatically expand network coverage."
+        help="Desired route distance (±20% tolerance). Network will automatically expand for longer routes."
     )
-    
-    # Check if we need larger network for this distance
-    if target_distance > 8.0 and graph and len(graph.nodes) < 1000:  # Small network indicator
-        st.sidebar.warning(f"⚠️ Large route ({target_distance}km) may be limited by current network size. Consider using CLI for routes >8km.")
-    elif target_distance > 25.0:
+
+    # Determine required network radius
+    required_radius = get_required_radius(target_distance)
+
+    # Check if we need to reload services with larger network
+    if required_radius > st.session_state.current_radius:
+        # Clear the old cache and load new network
+        st.info(f"🔄 Expanding network to {required_radius}km radius for {target_distance}km route...")
+        initialize_route_services.clear()  # Clear the cache
+        st.session_state.current_radius = required_radius
+        st.rerun()  # Restart to load new network
+
+    # Initialize services with current radius
+    services = initialize_route_services(st.session_state.current_radius)
+
+    if not services:
+        st.error("❌ Failed to initialize route services. Please refresh the page.")
+        return
+
+    # Get service instances
+    network_manager = services['network_manager']
+    route_optimizer = services['route_optimizer']
+    route_analyzer = services['route_analyzer']
+    elevation_profiler = services['elevation_profiler']
+    route_formatter = services['route_formatter']
+    graph = services['graph']
+
+    # Show current network info
+    if st.session_state.current_radius > 2.5:
+        st.sidebar.success(f"✅ Using {st.session_state.current_radius}km network (supports routes up to ~{st.session_state.current_radius * 4:.0f}km)")
+
+    # Error for excessive distances
+    if target_distance > 25.0:
         st.sidebar.error("❌ Routes >25km are not supported in web interface. Use CLI instead.")
     
     # Route objective
@@ -281,11 +325,30 @@ def main():
         help="Choose optimization strategy"
     )
     selected_objective = objectives[selected_objective_name]
-    
+
+    # Route type selection
+    route_type_options = {
+        "Loop": "loop",
+        "Out and Back": "out_and_back",
+        "Point to Point": "point_to_point"
+    }
+
+    selected_route_type_name = st.sidebar.selectbox(
+        "Route Type",
+        options=list(route_type_options.keys()),
+        index=0,  # Default to "Loop"
+        help="""
+        - **Loop**: Returns to start without reusing any road segments (most diverse)
+        - **Out and Back**: Goes out, then returns via the same route (good for specific destinations)
+        - **Point to Point**: Ends at a different location (one-way routes)
+        """
+    )
+    route_type = route_type_options[selected_route_type_name]
+
     # Algorithm selection
     # Use genetic algorithm (only supported algorithm)
     algorithm = "genetic"
-    
+
     # Footway filtering option
     exclude_footways = st.sidebar.checkbox(
         "Exclude footways/sidewalks",
@@ -376,7 +439,8 @@ def main():
                         target_distance_km=target_distance,
                         objective=selected_objective,
                         algorithm=algorithm,
-                        exclude_footways=exclude_footways
+                        exclude_footways=exclude_footways,
+                        route_type=route_type
                     )
                     
                     if result:

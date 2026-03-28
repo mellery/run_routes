@@ -30,22 +30,24 @@ class FitnessObjective(Enum):
 class GAFitnessEvaluator:
     """Fitness evaluation system for genetic algorithm route optimization"""
     
-    def __init__(self, objective: str = "elevation", target_distance_km: float = 5.0, 
+    def __init__(self, objective: str = "elevation", target_distance_km: float = 5.0,
                  segment_cache: Optional[GASegmentCache] = None, enable_micro_terrain: bool = True,
-                 allow_bidirectional_segments: bool = True):
+                 allow_bidirectional_segments: bool = True, require_circular: bool = True):
         """Initialize fitness evaluator
-        
+
         Args:
             objective: Primary optimization objective
             target_distance_km: Target route distance in kilometers
             segment_cache: Optional segment cache for performance optimization
             enable_micro_terrain: Whether to enable micro-terrain analysis using pre-computed elevation data
             allow_bidirectional_segments: Whether to allow segments to be used in both directions
+            require_circular: Whether routes must return to start
         """
         self.objective = FitnessObjective(objective.lower())
         self.target_distance_km = target_distance_km
         self.target_distance_m = target_distance_km * 1000
         self.allow_bidirectional_segments = allow_bidirectional_segments
+        self.require_circular = require_circular
         
         # Segment cache for performance optimization
         self.segment_cache = segment_cache or get_global_segment_cache()
@@ -126,8 +128,8 @@ class GAFitnessEvaluator:
         Returns:
             Fitness score (0.0 - 1.0, higher is better)
         """
-        # Validate chromosome with bidirectional constraint before evaluation
-        if not chromosome.validate_connectivity(self.allow_bidirectional_segments) or not chromosome.segments:
+        # Validate chromosome with bidirectional and circular constraints before evaluation
+        if not chromosome.validate_connectivity(self.allow_bidirectional_segments, self.require_circular) or not chromosome.segments:
             chromosome.fitness = 0.0
             return 0.0
         

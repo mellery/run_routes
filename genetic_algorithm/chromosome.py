@@ -258,38 +258,46 @@ class RouteChromosome:
         self.objective_score = None
         self._segment_usage = {}  # Reset segment usage tracking
     
-    def validate_connectivity(self, allow_bidirectional: bool = True) -> bool:
+    def validate_connectivity(self, allow_bidirectional: bool = True, require_circular: bool = True) -> bool:
         """Validate that all segments are properly connected and respect usage limits
-        
+
         Args:
             allow_bidirectional: Whether to allow segments to be used in both directions
+            require_circular: Whether route must return to start (False for point-to-point routes)
         """
         if not self.segments:
             self.is_valid = False
             return False
-        
+
         # Check each segment is valid
         for segment in self.segments:
             if not segment.is_valid:
                 self.is_valid = False
                 return False
-        
+
         # Check segments are connected
         for i in range(len(self.segments) - 1):
             if self.segments[i].end_node != self.segments[i + 1].start_node:
                 self.is_valid = False
                 return False
-        
+
         # Check if route is circular
-        if (len(self.segments) > 0 and 
+        if (len(self.segments) > 0 and
             self.segments[0].start_node == self.segments[-1].end_node):
             self.is_circular = True
-        
+        else:
+            self.is_circular = False
+
+        # For routes that require circularity, enforce it
+        if require_circular and not self.is_circular:
+            self.is_valid = False
+            return False
+
         # Validate segment usage limits
         if not self._validate_segment_usage(allow_bidirectional):
             self.is_valid = False
             return False
-        
+
         self.is_valid = True
         return True
     

@@ -54,7 +54,7 @@ class PopulationInitializer:
         'terrain_aware': 0.15
     }
 
-    def __init__(self, graph: nx.Graph, start_node: int, allow_bidirectional: bool = True):
+    def __init__(self, graph: nx.Graph, start_node: int, allow_bidirectional: bool = True, require_circular: bool = True):
         """
         Initialize population creator.
 
@@ -62,10 +62,12 @@ class PopulationInitializer:
             graph: NetworkX graph with elevation data
             start_node: Starting node for all routes
             allow_bidirectional: Whether to allow bidirectional segment usage
+            require_circular: Whether routes must return to start
         """
         self.graph = graph
         self.start_node = start_node
         self.allow_bidirectional = allow_bidirectional
+        self.require_circular = require_circular
 
         # Cache for performance
         self._neighbor_cache = {}
@@ -101,16 +103,25 @@ class PopulationInitializer:
         population = []
         target_distance_m = target_distance_km * 1000
 
-        # Use default strategy mix if not provided
+        # Use default strategy mix if not provided, but adapt for point-to-point routes
         if strategy_mix is None:
-            strategy_mix = self.DEFAULT_STRATEGY_MIX.copy()
+            if self.require_circular:
+                strategy_mix = self.DEFAULT_STRATEGY_MIX.copy()
+            else:
+                # Point-to-point routes need different strategies
+                strategy_mix = {
+                    'point_to_point_directional': 0.5,  # Walk away in one direction
+                    'point_to_point_elevation': 0.3,    # Target elevation while walking away
+                    'random_walk': 0.2                  # Some randomness
+                }
 
         # Validate strategy mix
         total = sum(strategy_mix.values())
         if not (0.99 <= total <= 1.01):  # Allow small floating point error
             raise ValueError(f"Strategy mix must sum to 1.0, got {total}")
 
-        print(f"Creating population of {size} chromosomes, target distance: {target_distance_km}km")
+        route_type = "circular" if self.require_circular else "point-to-point"
+        print(f"Creating population of {size} chromosomes, target distance: {target_distance_km}km ({route_type})")
         print(f"Strategy mix: {strategy_mix}")
 
         # Pre-compute data structures for efficiency
@@ -136,19 +147,24 @@ class PopulationInitializer:
                 if time.time() - start_time > timeout_seconds:
                     break
 
-                chromosome = self._create_route_by_strategy(strategy_name, target_distance_m)
+                # Try multiple times to create a valid route
+                max_attempts = 5 if self.require_circular and not self.allow_bidirectional else 3
+                chromosome = None
 
-                if chromosome and chromosome.validate_connectivity(self.allow_bidirectional):
-                    chromosome.creation_method = strategy_name
-                    chromosome.generation = 0
-                    population.append(chromosome)
+                for attempt in range(max_attempts):
+                    chromosome = self._create_route_by_strategy(strategy_name, target_distance_m)
+                    if chromosome and chromosome.validate_connectivity(self.allow_bidirectional, self.require_circular):
+                        chromosome.creation_method = strategy_name
+                        chromosome.generation = 0
+                        population.append(chromosome)
+                        break  # Success, move to next route
 
         print(f"Created {len(population)}/{size} valid chromosomes")
 
         # Fill remaining slots with fallback routes
         while len(population) < size and time.time() - start_time < timeout_seconds:
             fallback = self._create_simple_fallback_route(target_distance_m)
-            if fallback and fallback.validate_connectivity(self.allow_bidirectional):
+            if fallback and fallback.validate_connectivity(self.allow_bidirectional, self.require_circular):
                 fallback.creation_method = "fallback"
                 fallback.generation = 0
                 population.append(fallback)
@@ -203,12 +219,25 @@ class PopulationInitializer:
             return self._create_distance_compliant_route(target_distance_m, sub_strategy)
         elif strategy_name == 'terrain_aware':
             return self._create_terrain_aware_route(target_distance_m)
+        elif strategy_name == 'point_to_point_directional':
+            return self._create_point_to_point_directional(target_distance_m)
+        elif strategy_name == 'point_to_point_elevation':
+            return self._create_point_to_point_elevation(target_distance_m)
         else:
             print(f"Warning: Unknown strategy '{strategy_name}', using random walk")
             return self._create_random_walk_route(target_distance_m)
 
     def _create_random_walk_route(self, target_distance_m: float) -> Optional[RouteChromosome]:
-        """Create route using random walk strategy"""
+        """Create route using random walk strategy
+
+        For circular routes (loops), uses "walk out, then return" strategy.
+        For non-circular routes, just walks randomly.
+        """
+        if self.require_circular:
+            # For loops, walk out ~50% of distance, then find path back
+            return self._create_loop_walk_return(target_distance_m)
+
+        # For non-circular, standard random walk
         current_node = self.start_node
         segments = []
         total_distance = 0.0
@@ -246,6 +275,116 @@ class PopulationInitializer:
 
         return RouteChromosome(segments)
 
+    def _create_loop_walk_return(self, target_distance_m: float) -> Optional[RouteChromosome]:
+        """Create circular loop by walking out ~50%, then finding path back
+
+        This ensures the route returns to start, which is required for loops.
+        """
+        current_node = self.start_node
+        segments = []
+        total_distance = 0.0
+        visited_nodes = {current_node}
+        segment_usage = {}
+
+        # Phase 1: Walk out to ~40-50% of target distance
+        # Be more conservative - aim for 30-40% so we have more options for return
+        outbound_target = target_distance_m * random.uniform(0.3, 0.4)
+        max_outbound_segments = max(15, int(target_distance_m / 300))
+
+        for _ in range(max_outbound_segments):
+            if total_distance >= outbound_target:
+                break
+
+            neighbors = self._get_reachable_neighbors(current_node, max_distance=800)
+            available_neighbors = [
+                n for n in neighbors
+                if (n not in visited_nodes or len(visited_nodes) < 3)
+                and self._can_use_segment(current_node, n, segment_usage)
+            ]
+
+            if not available_neighbors:
+                break
+
+            # Score neighbors by: (1) moving away from start, (2) having good connectivity
+            def score_neighbor(neighbor):
+                score = 0.0
+
+                # Factor 1: Distance from start (prefer moving away)
+                if self._distances_from_start:
+                    start_dist = self._distances_from_start.get(neighbor, 0)
+                    current_dist = self._distances_from_start.get(current_node, 0)
+                    if start_dist > current_dist:
+                        score += (start_dist - current_dist) * 1.0
+                    else:
+                        score += (start_dist - current_dist) * 0.2
+
+                # Factor 2: Connectivity (prefer well-connected nodes)
+                neighbor_degree = self.graph.degree(neighbor)
+                score += neighbor_degree * 5.0  # Bonus for having many connections
+
+                return score
+
+            scored = [(n, score_neighbor(n)) for n in available_neighbors]
+            scored.sort(key=lambda x: x[1], reverse=True)
+
+            # Try top candidates until we find one that works
+            next_node = None
+            for candidate, _ in scored[:min(3, len(scored))]:
+                segment = self._create_segment(current_node, candidate)
+                if segment and segment.length > 0:
+                    next_node = candidate
+                    break
+
+            if next_node:
+                segment = self._create_segment(current_node, next_node)
+                segments.append(segment)
+                total_distance += segment.length
+                self._update_segment_usage(current_node, next_node, segment_usage)
+                visited_nodes.add(next_node)
+                current_node = next_node
+            else:
+                break
+
+        # Phase 2: Find path back to start avoiding used segments
+        if current_node != self.start_node and segments:
+            try:
+                # Create a filtered graph that excludes used segments
+                filtered_graph = self.graph.copy()
+                for u, v in segment_usage.keys():
+                    # Remove both directions if not allowing bidirectional
+                    if not self.allow_bidirectional:
+                        if filtered_graph.has_edge(u, v):
+                            filtered_graph.remove_edge(u, v)
+                        if filtered_graph.has_edge(v, u):
+                            filtered_graph.remove_edge(v, u)
+
+                # Find return path
+                return_path = nx.shortest_path(filtered_graph, current_node, self.start_node, weight='length')
+
+                # Convert path to segments
+                for i in range(len(return_path) - 1):
+                    segment = self._create_segment(return_path[i], return_path[i+1])
+                    if segment and segment.length > 0:
+                        segments.append(segment)
+                        total_distance += segment.length
+                        self._update_segment_usage(return_path[i], return_path[i+1], segment_usage)
+                    else:
+                        return None  # Failed to create return segment
+
+            except (nx.NetworkXNoPath, nx.NodeNotFound):
+                # Can't find path back without reusing segments
+                # Return None so population initializer can try again
+                return None
+
+        # Validate total distance is reasonable (40-180% of target - more lenient for loops)
+        if segments and 0.4 * target_distance_m <= total_distance <= 1.8 * target_distance_m:
+            chromosome = RouteChromosome(segments)
+            # Extra validation: must actually be circular
+            if chromosome.segments and chromosome.segments[0].start_node == chromosome.segments[-1].end_node:
+                return chromosome
+
+        return None
+
     def _create_directional_route(self, target_distance_m: float, direction: str) -> Optional[RouteChromosome]:
         """Create route with directional bias"""
         # Direction angle mapping
@@ -282,8 +421,11 @@ class PopulationInitializer:
             # Select neighbor weighted by directional score
             neighbors_list, scores = zip(*neighbor_scores)
             total_score = sum(scores)
-            probabilities = [s / total_score for s in scores]
-            next_node = np.random.choice(neighbors_list, p=probabilities)
+            if total_score == 0:
+                next_node = random.choice(neighbors_list)
+            else:
+                probabilities = [s / total_score for s in scores]
+                next_node = np.random.choice(neighbors_list, p=probabilities)
 
             # Create segment
             segment = self._create_segment(current_node, next_node)
@@ -301,6 +443,14 @@ class PopulationInitializer:
 
     def _create_elevation_focused_route(self, target_distance_m: float) -> Optional[RouteChromosome]:
         """Create route targeting elevation gain"""
+        # For circular routes, use walk-and-return pattern
+        if self.require_circular:
+            return self._create_walk_and_return(
+                target_distance_m,
+                neighbor_selector=self._select_uphill_neighbor
+            )
+
+        # For non-circular, simple elevation-focused walk
         current_node = self.start_node
         segments = []
         total_distance = 0.0
@@ -327,8 +477,11 @@ class PopulationInitializer:
             # Select neighbor weighted by elevation gain
             neighbors_list, scores = zip(*neighbor_scores)
             total_score = sum(scores)
-            probabilities = [s / total_score for s in scores]
-            next_node = np.random.choice(neighbors_list, p=probabilities)
+            if total_score == 0:
+                next_node = random.choice(neighbors_list)
+            else:
+                probabilities = [s / total_score for s in scores]
+                next_node = np.random.choice(neighbors_list, p=probabilities)
 
             # Create segment
             segment = self._create_segment(current_node, next_node)
@@ -343,8 +496,121 @@ class PopulationInitializer:
 
         return RouteChromosome(segments)
 
+    def _create_walk_and_return(self, target_distance_m: float, neighbor_selector) -> Optional[RouteChromosome]:
+        """Generic walk-and-return pattern for circular routes
+
+        Args:
+            target_distance_m: Target distance
+            neighbor_selector: Function(current_node, neighbors, segment_usage) -> next_node
+        """
+        current_node = self.start_node
+        segments = []
+        total_distance = 0.0
+        visited_nodes = {current_node}
+        segment_usage = {}
+
+        # Phase 1: Walk out to ~40-50% of target
+        outbound_target = target_distance_m * random.uniform(0.4, 0.5)
+        max_outbound_segments = max(15, int(target_distance_m / 300))
+
+        for _ in range(max_outbound_segments):
+            if total_distance >= outbound_target:
+                break
+
+            neighbors = self._get_reachable_neighbors(current_node, max_distance=800)
+            available = [n for n in neighbors if self._can_use_segment(current_node, n, segment_usage)]
+
+            if not available:
+                break
+
+            # Use custom selector
+            next_node = neighbor_selector(current_node, available, segment_usage)
+            if not next_node:
+                break
+
+            segment = self._create_segment(current_node, next_node)
+            if segment and segment.length > 0:
+                segments.append(segment)
+                total_distance += segment.length
+                self._update_segment_usage(current_node, next_node, segment_usage)
+                visited_nodes.add(next_node)
+                current_node = next_node
+            else:
+                break
+
+        # Phase 2: Find path back
+        return self._add_return_path(segments, current_node, segment_usage, total_distance, target_distance_m)
+
+    def _select_uphill_neighbor(self, current_node: int, neighbors: List[int], segment_usage: Dict) -> Optional[int]:
+        """Select neighbor with best elevation gain"""
+        current_elev = self.graph.nodes[current_node].get('elevation', 0)
+        neighbor_scores = []
+
+        for neighbor in neighbors:
+            neighbor_elev = self.graph.nodes[neighbor].get('elevation', 0)
+            elevation_gain = neighbor_elev - current_elev
+            score = max(0.1, elevation_gain + 5.0)  # Prefer uphill, add 5 to ensure positive scores
+            neighbor_scores.append((neighbor, score))
+
+        if not neighbor_scores:
+            return None
+
+        neighbors_list, scores = zip(*neighbor_scores)
+        total_score = sum(scores)
+
+        # Guard against division by zero (shouldn't happen with +5.0 offset, but be safe)
+        if total_score == 0:
+            return random.choice(neighbors_list)
+
+        probabilities = [s / total_score for s in scores]
+        return np.random.choice(neighbors_list, p=probabilities)
+
+    def _add_return_path(self, segments: List, current_node: int, segment_usage: Dict,
+                         total_distance: float, target_distance_m: float) -> Optional[RouteChromosome]:
+        """Add return path to complete circular route"""
+        if current_node == self.start_node:
+            # Already at start
+            if 0.5 * target_distance_m <= total_distance <= 1.5 * target_distance_m:
+                return RouteChromosome(segments) if segments else None
+            return None
+
+        try:
+            # Create filtered graph
+            filtered_graph = self.graph.copy()
+            for u, v in segment_usage.keys():
+                if not self.allow_bidirectional:
+                    if filtered_graph.has_edge(u, v):
+                        filtered_graph.remove_edge(u, v)
+                    if filtered_graph.has_edge(v, u):
+                        filtered_graph.remove_edge(v, u)
+
+            # Find return path
+            return_path = nx.shortest_path(filtered_graph, current_node, self.start_node, weight='length')
+
+            # Convert to segments
+            for i in range(len(return_path) - 1):
+                segment = self._create_segment(return_path[i], return_path[i+1])
+                if segment and segment.length > 0:
+                    segments.append(segment)
+                    total_distance += segment.length
+                else:
+                    return None
+
+            # Validate distance
+            if 0.5 * target_distance_m <= total_distance <= 1.5 * target_distance_m:
+                return RouteChromosome(segments)
+
+        except (nx.NetworkXNoPath, nx.NodeNotFound):
+            return None
+
+        return None
+
     def _create_distance_compliant_route(self, target_distance_m: float, sub_strategy: str) -> Optional[RouteChromosome]:
         """Create distance-compliant route using specified sub-strategy"""
+        # For circular routes without bidirectional segments, use walk-and-return
+        if self.require_circular and not self.allow_bidirectional:
+            return self._create_loop_walk_return(target_distance_m)
+
         min_distance = target_distance_m * 0.85
         max_distance = target_distance_m * 1.15
 
@@ -473,6 +739,12 @@ class PopulationInitializer:
         if not self._high_elevation_nodes:
             return self._create_random_walk_route(target_distance_m)
 
+        # For circular routes without bidirectional segments, use elevation-focused walk-and-return
+        if self.require_circular and not self.allow_bidirectional:
+            # Reuse the working elevation_focused strategy which already handles loops correctly
+            return self._create_elevation_focused_route(target_distance_m)
+
+        # For out-and-back routes (bidirectional allowed), can reuse segments
         # Select high-elevation target
         target_node = random.choice(self._high_elevation_nodes[:min(20, len(self._high_elevation_nodes))])[0]
 
@@ -496,10 +768,135 @@ class PopulationInitializer:
 
         return None
 
+    def _create_point_to_point_directional(self, target_distance_m: float) -> Optional[RouteChromosome]:
+        """Create point-to-point route by walking in one general direction"""
+        current_node = self.start_node
+        segments = []
+        total_distance = 0.0
+        visited_nodes = {current_node}
+        max_segments = max(30, int(target_distance_m / 200))
+        segment_usage = {}
+
+        # Pick a random direction to head towards
+        direction = random.choice(['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'])
+        direction_radians = {
+            'N': 0, 'NE': math.pi/4, 'E': math.pi/2, 'SE': 3*math.pi/4,
+            'S': math.pi, 'SW': 5*math.pi/4, 'W': 3*math.pi/2, 'NW': 7*math.pi/4
+        }[direction]
+
+        while total_distance < target_distance_m * 0.95 and len(segments) < max_segments:
+            neighbors = self._get_reachable_neighbors(current_node, max_distance=800)
+            if not neighbors:
+                break
+
+            # Filter out visited nodes and respect segment usage constraints
+            valid_neighbors = [
+                n for n in neighbors
+                if n not in visited_nodes or len(visited_nodes) < 3  # Allow some revisits early on
+                and self._can_use_segment(current_node, n, segment_usage)
+            ]
+
+            if not valid_neighbors:
+                break
+
+            # Pick neighbor that continues in the chosen direction
+            def score_neighbor(neighbor):
+                # Calculate bearing to this neighbor
+                curr_lat = self.graph.nodes[current_node]['y']
+                curr_lon = self.graph.nodes[current_node]['x']
+                neigh_lat = self.graph.nodes[neighbor]['y']
+                neigh_lon = self.graph.nodes[neighbor]['x']
+
+                bearing = math.atan2(neigh_lon - curr_lon, neigh_lat - curr_lat)
+
+                # Calculate angle difference from target direction
+                angle_diff = abs(bearing - direction_radians)
+                if angle_diff > math.pi:
+                    angle_diff = 2 * math.pi - angle_diff
+
+                # Prefer neighbors in the target direction
+                return -angle_diff  # Negative so max() picks smallest angle difference
+
+            next_node = max(valid_neighbors, key=score_neighbor)
+
+            # Create segment
+            segment = self._create_segment(current_node, next_node)
+            if segment and segment.length > 0:
+                segments.append(segment)
+                total_distance += segment.length
+                self._update_segment_usage(current_node, next_node, segment_usage)
+                visited_nodes.add(next_node)
+                current_node = next_node
+            else:
+                break
+
+        if segments and 0.5 * target_distance_m <= total_distance <= 1.5 * target_distance_m:
+            return RouteChromosome(segments)
+        return None
+
+    def _create_point_to_point_elevation(self, target_distance_m: float) -> Optional[RouteChromosome]:
+        """Create point-to-point route targeting elevation gains"""
+        current_node = self.start_node
+        segments = []
+        total_distance = 0.0
+        visited_nodes = {current_node}
+        max_segments = max(30, int(target_distance_m / 200))
+        segment_usage = {}
+
+        while total_distance < target_distance_m * 0.95 and len(segments) < max_segments:
+            neighbors = self._get_reachable_neighbors(current_node, max_distance=800)
+            if not neighbors:
+                break
+
+            # Filter valid neighbors
+            valid_neighbors = [
+                n for n in neighbors
+                if n not in visited_nodes or len(visited_nodes) < 3
+                and self._can_use_segment(current_node, n, segment_usage)
+            ]
+
+            if not valid_neighbors:
+                break
+
+            # Pick neighbor with highest elevation gain
+            def score_neighbor(neighbor):
+                curr_elev = self.graph.nodes[current_node].get('elevation', 0)
+                neigh_elev = self.graph.nodes[neighbor].get('elevation', 0)
+                elevation_gain = neigh_elev - curr_elev
+
+                # Strongly prefer uphill
+                if elevation_gain > 5:
+                    return elevation_gain * 2
+                elif elevation_gain > 0:
+                    return elevation_gain
+                else:
+                    # Penalize downhill but don't completely exclude
+                    return elevation_gain * 0.3
+
+            next_node = max(valid_neighbors, key=score_neighbor)
+
+            # Create segment
+            segment = self._create_segment(current_node, next_node)
+            if segment and segment.length > 0:
+                segments.append(segment)
+                total_distance += segment.length
+                self._update_segment_usage(current_node, next_node, segment_usage)
+                visited_nodes.add(next_node)
+                current_node = next_node
+            else:
+                break
+
+        if segments and 0.5 * target_distance_m <= total_distance <= 1.5 * target_distance_m:
+            return RouteChromosome(segments)
+        return None
+
     def _create_simple_fallback_route(self, target_distance_m: float) -> Optional[RouteChromosome]:
         """Create simple fallback route when other strategies fail"""
-        # Just do a short random walk
-        return self._create_random_walk_route(target_distance_m * 0.5)
+        # For point-to-point, try directional strategy; for circular, random walk
+        if not self.require_circular:
+            return self._create_point_to_point_directional(target_distance_m)
+        else:
+            return self._create_random_walk_route(target_distance_m * 0.5)
 
     # Helper methods
 

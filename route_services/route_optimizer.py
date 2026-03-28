@@ -23,23 +23,17 @@ except ImportError as e:
     print(f"GA import error: {e}")
     GA_AVAILABLE = False
 
-# Enhanced elevation imports
-try:
-    from elevation_data_sources import get_elevation_manager, ElevationDataManager
-    ENHANCED_ELEVATION_AVAILABLE = True
-except ImportError:
-    ENHANCED_ELEVATION_AVAILABLE = False
+# Legacy elevation system removed - elevation data is now in graph nodes via utils/elevation.py
 
 
 class RouteOptimizer:
     """Manages route optimization with solver fallbacks"""
     
-    def __init__(self, graph: nx.Graph, elevation_config_path: Optional[str] = None, verbose: bool = True):
-        """Initialize route optimizer with enhanced elevation support
-        
+    def __init__(self, graph: nx.Graph, verbose: bool = True):
+        """Initialize route optimizer
+
         Args:
-            graph: NetworkX graph for route planning
-            elevation_config_path: Optional path to elevation configuration file
+            graph: NetworkX graph for route planning (should include elevation data in nodes)
             verbose: Whether to show initialization messages
         """
         self.graph = graph
@@ -47,46 +41,10 @@ class RouteOptimizer:
         self._optimizer_instance = None
         self._solver_type = None
         self._ga_optimizer = None
-        self._elevation_manager = None
-        self._elevation_source = None
-        
-        # Initialize enhanced elevation support
-        self._initialize_elevation(elevation_config_path)
+
+        # Note: Elevation data is pre-loaded in graph nodes via utils/elevation.py
+        # No separate elevation initialization needed
         self._initialize_solver()
-    
-    def _initialize_elevation(self, elevation_config_path: Optional[str] = None):
-        """Initialize enhanced elevation data sources
-        
-        Args:
-            elevation_config_path: Optional path to elevation configuration file
-        """
-        if ENHANCED_ELEVATION_AVAILABLE:
-            try:
-                self._elevation_manager = get_elevation_manager(elevation_config_path)
-                self._elevation_source = self._elevation_manager.get_elevation_source()
-                
-                if self._elevation_source and self.verbose:
-                    source_info = self._elevation_source.get_source_info()
-                    print(f"📊 Enhanced elevation system initialized:")
-                    print(f"   Source: {source_info.get('type', 'Unknown')}")
-                    print(f"   Resolution: {self._elevation_source.get_resolution()}m")
-                    
-                    # Show hybrid source usage if applicable
-                    if hasattr(self._elevation_source, 'get_stats'):
-                        stats = self._elevation_source.get_stats()
-                        if stats and 'primary_percentage' in stats:
-                            print(f"   High-resolution coverage: Available for precision optimization")
-                elif not self._elevation_source and self.verbose:
-                    print("⚠️ No elevation sources configured")
-                    
-            except Exception as e:
-                if self.verbose:
-                    print(f"⚠️ Enhanced elevation initialization failed: {e}")
-                self._elevation_manager = None
-                self._elevation_source = None
-        else:
-            if self.verbose:
-                print("⚠️ Enhanced elevation system not available")
     
     def _initialize_solver(self):
         """Initialize the genetic algorithm optimizer"""
@@ -114,11 +72,12 @@ class RouteOptimizer:
         return self._solver_type
     
     def optimize_route(self, start_node: int, target_distance_km: float,
-                      objective: str = None, algorithm: str = "genetic", 
-                      exclude_footways: bool = True, 
-                      allow_bidirectional_segments: bool = True) -> Optional[Dict[str, Any]]:
+                      objective: str = None, algorithm: str = "genetic",
+                      exclude_footways: bool = True,
+                      allow_bidirectional_segments: bool = True,
+                      route_type: str = "loop") -> Optional[Dict[str, Any]]:
         """Generate optimized route
-        
+
         Args:
             start_node: Starting node ID
             target_distance_km: Target route distance in kilometers
@@ -126,41 +85,56 @@ class RouteOptimizer:
             algorithm: Algorithm to use ('genetic')
             exclude_footways: Whether to exclude footway segments (default True)
             allow_bidirectional_segments: Whether to allow segments to be used in both directions (default True)
-            
+            route_type: Type of route ("loop", "out_and_back", "point_to_point")
+
         Returns:
             Route result dictionary or None if optimization fails
         """
         if not self.graph:
             print("❌ No graph loaded")
             return None
-        
+
         if start_node not in self.graph.nodes:
             print(f"❌ Invalid start node: {start_node}")
             return None
-        
+
         if target_distance_km <= 0:
             print(f"❌ Invalid target distance: {target_distance_km}")
             return None
-        
+
         # Set default objective
         if objective is None:
             objective = self._route_objective.MINIMIZE_DISTANCE
-        
+
+        # Convert route_type to configuration
+        if route_type == "out_and_back":
+            allow_bidirectional_segments = True
+            require_circular = True
+        elif route_type == "point_to_point":
+            allow_bidirectional_segments = False
+            require_circular = False
+        else:  # loop
+            allow_bidirectional_segments = False
+            require_circular = True
+
         # Algorithm selection logic
         selected_algorithm = self._select_algorithm(algorithm, objective)
-        
+
         print(f"🚀 Generating optimized route...")
         print(f"   Start node: {start_node}")
         print(f"   Target distance: {target_distance_km:.1f} km")
+        print(f"   Route type: {route_type}")
         print(f"   Objective: {objective}")
         print(f"   Algorithm: {selected_algorithm}")
         print(f"   Solver: {self._solver_type}")
         print(f"   Exclude footways: {exclude_footways}")
         print(f"   Allow bidirectional segments: {allow_bidirectional_segments}")
-        
+        print(f"   Require circular: {require_circular}")
+
         try:
             # Use genetic algorithm optimization
-            return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways, allow_bidirectional_segments)
+            return self._optimize_genetic(start_node, target_distance_km, objective, exclude_footways,
+                                         allow_bidirectional_segments, require_circular, route_type)
                 
         except Exception as e:
             print(f"❌ Route generation failed: {e}")
@@ -246,16 +220,20 @@ class RouteOptimizer:
         # Always use genetic algorithm
         return "genetic"
     
-    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str, exclude_footways: bool = True, allow_bidirectional_segments: bool = True) -> Optional[Dict[str, Any]]:
+    def _optimize_genetic(self, start_node: int, target_distance_km: float, objective: str,
+                         exclude_footways: bool = True, allow_bidirectional_segments: bool = True,
+                         require_circular: bool = True, route_type: str = "loop") -> Optional[Dict[str, Any]]:
         """Optimize route using genetic algorithm
-        
+
         Args:
             start_node: Starting node ID
             target_distance_km: Target route distance in kilometers
             objective: Route objective
             exclude_footways: Whether to exclude footway segments
             allow_bidirectional_segments: Whether to allow segments to be used in both directions
-            
+            require_circular: Whether route must return to start
+            route_type: Type of route ("loop", "out_and_back", "point_to_point")
+
         Returns:
             Route result dictionary or None if optimization fails
         """
@@ -263,13 +241,15 @@ class RouteOptimizer:
             if self.verbose:
                 print("❌ GA optimizer not available")
             return None
-        
+
         # Filter graph if needed
         working_graph = self._filter_graph_for_routing(exclude_footways) if exclude_footways else self.graph
-        
+
         # Create GA optimizer with appropriate configuration
         config = GAConfig(
             allow_bidirectional_segments=allow_bidirectional_segments,
+            require_circular=require_circular,
+            route_type=route_type,
             use_distance_compliant_initialization=True,
             use_constraint_preserving_operators=True
         )
@@ -301,7 +281,7 @@ class RouteOptimizer:
                 print(f"✅ GA route generated in {solve_time:.2f} seconds")
             
             # Convert GA results to standard format
-            result = self._convert_ga_results_to_standard(ga_results, objective)
+            result = self._convert_ga_results_to_standard(ga_results, objective, require_circular)
             
             # Add solver metadata
             result['solver_info'] = {
@@ -340,25 +320,24 @@ class RouteOptimizer:
         else:
             return "elevation"  # default to elevation for GA
     
-    def _convert_ga_results_to_standard(self, ga_results, objective: str) -> Dict[str, Any]:
+    def _convert_ga_results_to_standard(self, ga_results, objective: str, require_circular: bool = True) -> Dict[str, Any]:
         """Convert GA results to standard route format
-        
+
         Args:
             ga_results: GAResults object
             objective: Original objective string
-            
+            require_circular: Whether route should return to start
+
         Returns:
             Standard route result dictionary
         """
         best_chromosome = ga_results.best_chromosome
-        
+
         # Get basic route information (use route nodes instead of complete path for better connectivity)
         route_nodes = best_chromosome.get_route_nodes()
-        total_distance = best_chromosome.get_total_distance()
-        total_elevation_gain = best_chromosome.get_total_elevation_gain()
-        
-        # Ensure route forms a complete loop by returning to start
-        if route_nodes and len(best_chromosome.segments) > 0:
+
+        # Ensure route forms a complete loop by returning to start (only for circular routes)
+        if require_circular and route_nodes and len(best_chromosome.segments) > 0:
             start_node = best_chromosome.segments[0].start_node
             if route_nodes[-1] != start_node:
                 # Only add start node if there's a direct edge, otherwise leave incomplete
@@ -366,26 +345,26 @@ class RouteOptimizer:
                     route_nodes.append(start_node)
                 # Note: If no direct edge exists, the route remains incomplete
                 # This is better than adding invalid edges that break test validation
-        
+
+        # Get complete route statistics from chromosome
+        stats = best_chromosome.get_route_stats()
+
+        # Add GA-specific metadata to stats
+        stats['fitness_score'] = ga_results.best_fitness
+        stats['route_type'] = 'genetic_algorithm'
+        stats['objective'] = objective
+
         # Create standard result format
         result = {
             'route': route_nodes,
-            'total_distance_km': total_distance / 1000.0,
-            'total_distance_m': total_distance,
-            'total_elevation_gain_m': total_elevation_gain,
+            'total_distance_km': stats['total_distance_km'],
+            'total_distance_m': stats['total_distance_m'],
+            'total_elevation_gain_m': stats['total_elevation_gain_m'],
             'fitness_score': ga_results.best_fitness,
-            'stats': {
-                'total_distance_km': total_distance / 1000.0,
-                'total_distance_m': total_distance,
-                'total_elevation_gain_m': total_elevation_gain,
-                'fitness_score': ga_results.best_fitness,
-                'num_nodes': len(route_nodes),
-                'route_type': 'genetic_algorithm',
-                'objective': objective
-            },
+            'stats': stats,
             'ga_stats': ga_results.stats
         }
-        
+
         return result
     
     def _create_filtered_graph(self, start_node: int) -> nx.Graph:
