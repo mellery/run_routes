@@ -236,7 +236,7 @@ class PopulationInitializer:
             segment = self._create_segment(current_node, next_node)
             if segment:
                 segments.append(segment)
-                total_distance += segment.distance
+                total_distance += segment.length
                 self._update_segment_usage(current_node, next_node, segment_usage)
                 visited_nodes.add(next_node)
                 current_node = next_node
@@ -289,7 +289,7 @@ class PopulationInitializer:
             segment = self._create_segment(current_node, next_node)
             if segment:
                 segments.append(segment)
-                total_distance += segment.distance
+                total_distance += segment.length
                 self._update_segment_usage(current_node, next_node, segment_usage)
                 visited_nodes.add(next_node)
                 current_node = next_node
@@ -334,7 +334,7 @@ class PopulationInitializer:
             segment = self._create_segment(current_node, next_node)
             if segment:
                 segments.append(segment)
-                total_distance += segment.distance
+                total_distance += segment.length
                 self._update_segment_usage(current_node, next_node, segment_usage)
                 current_node = next_node
 
