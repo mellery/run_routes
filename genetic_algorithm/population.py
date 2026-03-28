@@ -421,7 +421,8 @@ class PopulationInitializer:
 
             if segments:
                 chromosome = RouteChromosome(segments)
-                if min_distance <= chromosome.total_distance <= max_distance:
+                distance = chromosome.get_total_distance()
+                if min_distance <= distance <= max_distance:
                     return chromosome
         except nx.NetworkXNoPath:
             pass
@@ -459,7 +460,8 @@ class PopulationInitializer:
 
             if segments:
                 chromosome = RouteChromosome(segments)
-                if min_distance <= chromosome.total_distance <= max_distance:
+                distance = chromosome.get_total_distance()
+                if min_distance <= distance <= max_distance:
                     return chromosome
         except nx.NetworkXNoPath:
             pass
