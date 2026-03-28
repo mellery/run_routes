@@ -554,16 +554,9 @@ class PopulationInitializer:
         """Create RouteSegment from two nodes"""
         try:
             path = nx.shortest_path(self.graph, u, v, weight='length')
-            total_distance = 0.0
-
-            for i in range(len(path) - 1):
-                edge_data = self.graph.get_edge_data(path[i], path[i+1])
-                if edge_data:
-                    if isinstance(edge_data, dict) and 0 in edge_data:
-                        edge_data = edge_data[0]
-                    total_distance += edge_data.get('length', 0)
-
-            return RouteSegment(path, total_distance, self.graph)
+            segment = RouteSegment(start_node=u, end_node=v, path_nodes=path)
+            segment.calculate_properties(self.graph)
+            return segment
         except nx.NetworkXNoPath:
             return None
 
