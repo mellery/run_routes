@@ -254,11 +254,7 @@ def main():
     
     # Sidebar controls
     st.sidebar.header("Route Parameters")
-    
-    # Show solver information
-    solver_info = route_optimizer.get_solver_info()
-    st.sidebar.success(f"✅ Using {solver_info['solver_type']} GA solver")
-    
+
     # Target distance
     target_distance = st.sidebar.slider(
         "Target Distance (km)",
@@ -340,8 +336,7 @@ def main():
     
     with col1:
         st.subheader("🗺️ Select Starting Point")
-        st.markdown("Click on the map to choose your starting intersection:")
-        
+
         # Create and display map
         base_map = create_base_map(services)
         if base_map:
@@ -365,16 +360,9 @@ def main():
             if nearby_nodes:
                 start_node = nearby_nodes[0][0]  # Closest node
                 st.success(f"Selected starting point: Node {start_node}")
-                node_info = network_manager.get_node_info(graph, start_node)
-                st.info(f"Elevation: {node_info['elevation']:.0f}m")
         else:
-            # Show default node info
-            if network_manager.validate_node_exists(graph, start_node):
-                node_info = network_manager.get_node_info(graph, start_node)
-                st.info(f"Default starting point: Node {start_node}")
-                st.info(f"Elevation: {node_info['elevation']:.0f}m")
-                st.markdown("💡 *Click on the map to select a different starting point*")
-            else:
+            # Validate default node
+            if not network_manager.validate_node_exists(graph, start_node):
                 st.warning("Default starting point not found in current network")
         
         # Generate route button
